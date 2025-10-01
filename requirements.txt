@@ -1,3 +1,7 @@
 streamlit
+yfinance
 pandas
-Pillow
+numpy
+plotly
+ta
+requests
