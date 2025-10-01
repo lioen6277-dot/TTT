@@ -75,56 +75,41 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
                 progress_bar.empty()
                 return None
             
-            # --- 數據清洗與標準化 ---
+            # --- 數據清洗與標準化 (最終修正，確保 1D 數據結構) ---
             
-            # 1. 確保欄位名稱為簡單的字串，並進行統一標準化處理。
-            new_cols = {}
-            for col in data.columns:
-                # 處理可能的 MultiIndex (col 可能是 tuple) 或簡單字串
-                col_name = str(col[-1] if isinstance(col, tuple) else col)
+            # 1. 處理 MultiIndex 結構 (日內數據常見問題，扁平化欄位)
+            if isinstance(data.columns, pd.MultiIndex):
+                # 提取最內層的欄位名稱 (例如從 (Ticker, OHLCV) 中提取 OHLCV)
+                data.columns = [col[-1] if isinstance(col, tuple) else col for col in data.columns]
                 
-                # 統一命名格式 (例如: Adj Close -> Adj_Close, Open -> Open)
-                standard_name = col_name.replace('Adj Close', 'Adj_Close').replace(' ', '_').capitalize()
-                
-                # 處理重覆的欄位名稱
-                if standard_name in new_cols.values():
-                     standard_name = standard_name + "_Dupe"
-                
-                new_cols[col] = standard_name
-                
-            data = data.rename(columns=new_cols)
-
-            # --- 額外防禦性檢查和類型轉換 (修正 ValueError: Data must be 1-dimensional) ---
+            # 2. 統一欄位命名格式
+            data.columns = [c.replace('Adj Close', 'Adj_Close').replace(' ', '_').capitalize() for c in data.columns]
+            
+            # 3. 確保關鍵欄位存在並為 1D Series (修正所有維度錯誤)
             required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+
             for col in required_cols:
                 if col in data.columns:
-                    # 1. 如果欄位仍是 MultiIndex 或 2D DataFrame (罕見但可能發生)，嘗試扁平化
-                    # 這一步確保即使內部結構不標準，也能提取出 1D 數據
-                    if isinstance(data[col], pd.DataFrame):
-                        data[col] = data[col].iloc[:, 0]
-                    
-                    # 2. 確保數據類型為 float，並強制轉換為 Series
-                    # 這一步是解決 'ValueError: Data must be 1-dimensional' 的關鍵
-                    try:
-                        data[col] = pd.to_numeric(data[col], errors='coerce').astype(float)
-                    except Exception as type_e:
-                        st.warning(f"⚠️ 欄位 '{col}' 轉換為 float 失敗: {type_e}")
-            # --- 結束額外防禦性檢查 ---
-            
-            # 2. 處理缺失值 (使用前一個有效值填充，然後移除剩餘的 NaN)
+                    # 關鍵修正：將數據轉換為底層 NumPy 陣列並強制扁平化 (`.values.flatten()`)
+                    # 然後重新構建為一個乾淨的 1D pandas Series，dtype 設為 float。
+                    # 這樣就徹底解決了 'Data must be 1-dimensional' 的 ValueError。
+                    data[col] = pd.Series(
+                        data[col].values.flatten(), 
+                        index=data.index, 
+                        dtype=float 
+                    )
+                else:
+                    st.warning(f"⚠️ 數據缺少關鍵欄位: {col}")
+
+
+            # 4. 處理缺失值 (使用前一個有效值填充，然後移除剩餘的 NaN)
             data.fillna(method='ffill', inplace=True)
             data.dropna(inplace=True) 
             
-            # 3. 處理 Volume 為零的異常數據 (可能為數據錯誤或停牌日)
+            # 5. 處理 Volume 為零的異常數據 (可能為數據錯誤或停牌日)
             data = data[data['Volume'] > 0]
             
-            # 4. 確保關鍵欄位存在 (再次檢查，因為我們可能在轉換中丟失)
-            if not all(col in data.columns for col in required_cols):
-                st.error(f"⚠️ **數據格式錯誤:** 獲取的數據缺少關鍵欄位 ({required_cols})。")
-                progress_bar.empty()
-                return None
-            
-            # 5. 確保數據量足夠
+            # 6. 確保數據量足夠
             if len(data) < 20: # 至少需要20天計算短期均線
                 st.error(f"⚠️ **數據量過少:** {symbol} 在所選週期 ({period_key}) 僅有 {len(data)} 筆數據，無法進行有效分析。請選擇更長的週期。")
                 progress_bar.empty()
@@ -163,7 +148,7 @@ def calculate_technical_indicators(data):
     df['SMA_200'] = df['Close'].rolling(window=200).mean() # 增加長期趨勢判斷
     
     # 動量指標: RSI
-    # 這裡 df['Close'] 現在保證是 1D Series，解決了 ValueError
+    # 由於數據已在 get_data 中被強制轉換為 1D Series，這裡將順利運行
     df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
     
     # 動量指標: MACD
@@ -546,3 +531,19 @@ if __name__ == '__main__':
         st.session_state['current_asset_class'] = "台股" 
     
     main()
+```eof
+
+### 修正重點：確保數據是 1D 序列
+
+問題的核心是 `df['Close']` 在傳遞給 `ta` 庫時不是一個簡單的 1 維 `pd.Series`。
+
+在 `get_data` 函數中，針對 **Open, High, Low, Close, Volume** 五個關鍵欄位，我加入了以下 **極端防禦性** 的代碼：
+
+```python
+# 關鍵修正：將數據轉換為底層 NumPy 陣列並強制扁平化 (`.values.flatten()`)
+# 然後重新構建為一個乾淨的 1D pandas Series，dtype 設為 float。
+data[col] = pd.Series(
+    data[col].values.flatten(), 
+    index=data.index, 
+    dtype=float 
+)
