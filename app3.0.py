@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 
 # 為了在 Canvas 環境中模擬 API 金鑰
 # 實際執行時，Canvas 會自動注入 API 金鑰
-# 此處保留空白字串
 API_KEY = ""
 GEMINI_MODEL_TEXT = "gemini-2.5-flash-preview-05-20" 
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL_TEXT}:generateContent?key={API_KEY}"
@@ -95,14 +94,13 @@ def get_yfinance_data(symbol, period, interval):
 def calculate_technical_indicators(df):
     """
     計算並添加技術指標到 DataFrame。
-    **修復方案: 確保傳遞給 ta 庫的 'Close'/'Volume' 是單一 Pandas Series (1D 結構)**
+    確保傳遞給 ta 庫的 'Close'/'Volume' 是單一 Pandas Series (1D 結構)
     """
     if df is None or df.empty:
         return None
     
     try:
         # 1. 數據清理：替換無限值為 NaN
-        # 這一行是您 Traceback 中顯示的執行位置。
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
         # 確保我們操作的是 Pandas Series，防止傳遞多維數據給 ta 庫
@@ -152,7 +150,6 @@ def calculate_technical_indicators(df):
     except Exception as e:
         # 如果在計算 TA 時發生錯誤，打印錯誤並返回 None
         st.error(f"技術指標計算失敗，請檢查數據結構: {e}")
-        # print(f"Error in TA calculation: {e}")
         return None
 
 # ==============================================================================
@@ -266,15 +263,17 @@ async def retry_fetch(url, payload, retries=3, delay=1.0):
     headers = {'Content-Type': 'application/json'}
     for i in range(retries):
         try:
+            # 使用 Streamlit 內建的運行時上下文執行 fetch
+            # st.runtime.scriptrunner.add_script_run_ctx(fetch) 僅在 Streamlit 環境中可用
             response = await st.runtime.scriptrunner.add_script_run_ctx(
                 fetch
             )(url, method='POST', headers=headers, body=json.dumps(payload))
             if response.status == 200:
                 return await response.json()
-            # If not 200, wait and retry
+            
             await time.sleep(delay * (2 ** i)) 
         except Exception as e:
-            # print(f"Attempt {i+1} failed: {e}")
+            # print(f"Attempt {i+1} failed: {e}") # 避免在控制台記錄重試錯誤
             await time.sleep(delay * (2 ** i))
     raise Exception(f"Failed to fetch content after {retries} retries.")
 
@@ -291,17 +290,24 @@ def generate_analysis_payload(symbol, interval, latest_data_summary, indicators_
         "請使用繁體中文輸出。分析內容應包含：1. 技術面簡述 2. 宏觀/基本面（基於外部搜索） 3. 交易建議與風險提示。"
     )
 
+    # 獲取標的名稱，用於更準確的搜索
+    symbol_name = get_symbol_name(symbol)
+    if symbol_name != symbol:
+        search_term = f"{symbol_name} ({symbol})"
+    else:
+        search_term = symbol
+
     user_query = (
-        f"請針對標的 {symbol} (週期: {interval}) 進行四維度趨勢分析。\n\n"
+        f"請針對標的 {search_term} (週期: {interval}) 進行四維度趨勢分析。\n\n"
         f"【最新數據摘要】:\n{latest_data_summary}\n\n"
         f"【技術指標趨勢摘要】:\n{indicators_summary}\n\n"
-        f"請務必利用 Google Search 工具，獲取 {symbol} 的最新財報或重大新聞，並將其融入分析報告中。"
+        f"請務必利用 Google Search 工具，獲取 {search_term} 的最新財報或重大新聞，並將其融入分析報告中。"
     )
 
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         # 啟用 Google Search 進行基本面和消息面分析
-        "tools": [{"google_search": {}}],
+        "tools": [{"google_search": {} }],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
     }
     return payload
@@ -314,17 +320,16 @@ async def generate_ai_analysis(symbol, interval, df):
     if df is None or df.empty:
         return "無法生成分析：數據為空。"
 
-    st.subheader(f"🧠 AI 頂級專家分析報告 - {symbol} ({interval})")
     
     # 創建數據摘要
     latest_row = df.iloc[-1]
     
     latest_data_summary = f"""
-    - 最新收盤價 (Close): {latest_row['Close']:.2f}
-    - 20 日均價 (SMA 20): {latest_row['SMA_20']:.2f}
-    - 20 日布林通道上軌 (BB High): {latest_row['BB_High']:.2f}
-    - RSI (14): {latest_row['RSI']:.2f} (一般認為 <30 超賣, >70 超買)
-    - MACD 柱狀圖 (Hist): {latest_row['MACD_Hist']:.2f} (一般認為 >0 動能強勁)
+- 最新收盤價 (Close): {latest_row['Close']:.2f}
+- 20 日均價 (SMA 20): {latest_row['SMA_20']:.2f}
+- 20 日布林通道上軌 (BB High): {latest_row['BB_High']:.2f}
+- RSI (14): {latest_row['RSI']:.2f} (一般認為 <30 超賣, >70 超買)
+- MACD 柱狀圖 (Hist): {latest_row['MACD_Hist']:.2f} (一般認為 >0 動能強勁)
     """
 
     # 趨勢判斷邏輯 (簡化為 LLM 提供上下文)
@@ -336,18 +341,26 @@ async def generate_ai_analysis(symbol, interval, df):
     }
     
     indicators_summary = f"""
-    - 短期均線 (SMA 5) {'高於' if trend_data['SMA5_Above_SMA20'] else '低於'} 中期均線 (SMA 20)，顯示短期趨勢 {'看漲' if trend_data['SMA5_Above_SMA20'] else '看跌'}。
-    - MACD 柱狀圖 {'為正值' if trend_data['MACD_Positive'] else '為負值'}，動量顯示 {'多頭佔優' if trend_data['MACD_Positive'] else '空頭佔優'}。
-    - RSI 位於 {trend_data['RSI_Level']} 區域。
-    - 價格 {'正在觸及或突破' if trend_data['Price_Near_BB_High'] else '位於'} 布林通道上軌。
+- 短期均線 (SMA 5) {'高於' if trend_data['SMA5_Above_SMA20'] else '低於'} 中期均線 (SMA 20)，顯示短期趨勢 {'看漲' if trend_data['SMA5_Above_SMA20'] else '看跌'}。
+- MACD 柱狀圖 {'為正值' if trend_data['MACD_Positive'] else '為負值'}，動量顯示 {'多頭佔優' if trend_data['MACD_Positive'] else '空頭佔優'}。
+- RSI 位於 {trend_data['RSI_Level']} 區域。
+- 價格 {'正在觸及或突破' if trend_data['Price_Near_BB_High'] else '位於'} 布林通道上軌。
     """
 
     payload = generate_analysis_payload(symbol, interval, latest_data_summary, indicators_summary)
     
+    analysis_container = st.empty() # 創建一個空的容器來顯示結果
+    analysis_container.subheader(f"🧠 AI 頂級專家分析報告 - {symbol} ({interval})")
+    
     try:
         # 使用 Streamlit 內建的運行時上下文執行 fetch
-        with st.spinner("🤖 AI 正在整合基本面、技術面和宏觀消息進行深度分析..."):
+        with analysis_container.spinner("🤖 AI 正在整合基本面、技術面和宏觀消息進行深度分析..."):
             response_json = await retry_fetch(GEMINI_API_URL, payload)
+        
+        # 清除 Spinner 和標題
+        analysis_container.empty()
+        st.subheader(f"🧠 AI 頂級專家分析報告 - {symbol} ({interval})")
+
 
         if response_json and response_json.get('candidates'):
             candidate = response_json['candidates'][0]
@@ -372,8 +385,12 @@ async def generate_ai_analysis(symbol, interval, df):
                 st.markdown("---")
                 st.subheader("📚 資訊來源 (消息面/基本面)")
                 source_markdown = ""
-                for i, source in enumerate(sources):
-                    source_markdown += f"- **[{source['title']}]({source['uri']})**\n"
+                # 使用 set 避免重複的 URI
+                unique_sources = set()
+                for source in sources:
+                    if source['uri'] not in unique_sources:
+                         source_markdown += f"- **[{source['title']}]({source['uri']})**\n"
+                         unique_sources.add(source['uri'])
                 st.markdown(source_markdown)
         else:
             st.warning("AI 分析服務暫時無法回應。")
@@ -388,8 +405,18 @@ async def generate_ai_analysis(symbol, interval, df):
 def get_symbol_name(symbol):
     """根據代碼獲取中文名稱"""
     for data in FULL_SYMBOLS_MAP.values():
+        # 檢查關鍵詞中是否包含代碼（忽略大小寫）
         if data['keywords'] and symbol.upper() in [k.upper() for k in data['keywords']]:
             return data['name']
+    
+    # 處理特殊情況：如果 yfinance 提取的代碼帶有後綴
+    symbol_parts = symbol.split('.')
+    if len(symbol_parts) > 1:
+        base_symbol = symbol_parts[0]
+        for data in FULL_SYMBOLS_MAP.values():
+            if data['keywords'] and base_symbol.upper() in [k.upper() for k in data['keywords']]:
+                return data['name']
+
     return symbol
 
 
@@ -405,15 +432,28 @@ def main():
         st.session_state['current_symbol'] = "2330.TW"
     if 'current_interval' not in st.session_state:
         st.session_state['current_interval'] = "1 日"
+    if 'analysis_started' not in st.session_state:
+        st.session_state['analysis_started'] = False
+
 
     # 側邊欄 (Sidebar) 設置
     st.sidebar.title("📈 參數設定")
 
     # 1. 資產類別選擇 (簡化，主要影響推薦列表，實際仍靠代碼)
+    current_symbol_upper = st.session_state['current_symbol'].upper()
+    default_asset_index = 0
+    if current_symbol_upper.endswith('-USD'):
+        default_asset_index = 2
+    elif not any(suffix in current_symbol_upper for suffix in ['.TW', '.US', '-USD']):
+        # 假設沒有後綴的默認為美股 (US)
+        default_asset_index = 1 
+    elif current_symbol_upper.endswith('.TW'):
+        default_asset_index = 0
+    
     asset_class = st.sidebar.selectbox(
         "選擇資產類別",
         ["台股", "美股", "加密貨幣"],
-        index=0 if st.session_state['current_symbol'].endswith('.TW') else (1 if not st.session_state['current_symbol'].endswith('-USD') else 2)
+        index=default_asset_index
     )
 
     # 2. 快速選擇標的 (簡化，僅供參考)
@@ -423,10 +463,15 @@ def main():
         "加密貨幣": ["BTC-USD", "ETH-USD"]
     }.get(asset_class, [])
 
+    # 確保當前標的在快速選擇列表中時被選中
+    quick_select_index = 0
+    if st.session_state['current_symbol'] in default_symbols:
+        quick_select_index = default_symbols.index(st.session_state['current_symbol']) + 1
+
     quick_select = st.sidebar.selectbox(
         f"快速選擇標的 ({asset_class})",
         [""] + default_symbols,
-        index=0
+        index=quick_select_index
     )
 
     # 3. 手動輸入代碼 (核心輸入)
@@ -442,24 +487,23 @@ def main():
     
     # 4. 分析週期選擇
     interval_options = list(PERIOD_MAP.keys())
+    
     selected_interval = st.sidebar.selectbox(
         "選擇分析週期",
         interval_options,
         index=interval_options.index(st.session_state['current_interval'])
     )
     
-    # 更新 session state
-    st.session_state['sidebar_search_input'] = manual_input
-    st.session_state['current_symbol'] = search_symbol
-    st.session_state['current_interval'] = selected_interval
-
     # 5. 執行按鈕
+    # 點擊按鈕後才執行數據獲取和分析
     if st.sidebar.button("📊 執行AI分析", key="run_analysis", type="primary"):
         if not search_symbol:
             st.sidebar.error("請輸入或選擇標的代碼。")
         else:
             st.session_state['data_ready'] = False
             st.session_state['last_search_symbol'] = search_symbol
+            st.session_state['current_interval'] = selected_interval # 更新週期
+            st.session_state['analysis_started'] = True
             st.rerun() # 重新運行以獲取數據並顯示結果
 
     # --- 主要內容區 ---
@@ -469,18 +513,20 @@ def main():
     symbol_to_process = st.session_state['last_search_symbol']
     interval_to_process = st.session_state['current_interval']
     
-    if symbol_to_process:
+    if st.session_state['analysis_started'] and symbol_to_process:
         period, interval_yf = PERIOD_MAP[interval_to_process]
         
-        # 顯示目標標的資訊 (與您的 Traceback 輸出格式一致)
-        st.markdown(f"目標標的：**{symbol_to_process}** ({interval_to_process} 週期)")
+        # 顯示目標標的資訊
+        st.markdown(f"目標標的：**{get_symbol_name(symbol_to_process)}** (`{symbol_to_process}` - {interval_to_process} 週期)")
 
         # 獲取數據
-        df_raw, fetched_symbol = get_yfinance_data(symbol_to_process, period, interval_yf)
+        with st.spinner(f"正在從 Yahoo Finance 獲取 `{symbol_to_process}` 的歷史數據..."):
+            df_raw, fetched_symbol = get_yfinance_data(symbol_to_process, period, interval_yf)
         
         if df_raw is not None and not df_raw.empty:
-            # 計算技術指標 (這裡是修正了 ValueError 的核心函數)
-            df_with_ta = calculate_technical_indicators(df_raw.copy())
+            # 計算技術指標
+            with st.spinner("正在計算技術指標 (TA)..."):
+                df_with_ta = calculate_technical_indicators(df_raw.copy())
             
             if df_with_ta is not None:
                 st.session_state['data_ready'] = True
@@ -502,20 +548,24 @@ def main():
 
         # 2. 執行 AI 分析 (使用 await 調用非同步函數)
         st.markdown("---")
-        st.header("🤖 AI 分析結果")
-        st.markdown("")
-        st.session_state['ai_analysis_placeholder'] = st.empty()
-        st.session_state['ai_analysis_placeholder'].markdown("---")
-        st.session_state['ai_analysis_placeholder'].text("點擊『📊 執行AI分析』按鈕後，AI報告將顯示在此處...")
-
+        
         # 使用 Streamlit 的非同步執行器來運行 AI 分析
+        # 注意：Streamlit run_in_thread 接受同步函數，但我們在 Streamlit 環境中模擬 await fetch，所以保持結構不變
         st.run_in_thread(generate_ai_analysis(fetched_symbol, interval_to_process, df_display))
 
         st.markdown("---")
         st.subheader("📊 原始數據表 (含技術指標)")
-        st.dataframe(df_display.tail(30)) # 顯示最新 30 筆數據
+        st.dataframe(df_display.tail(30).style.format({
+            'Open': '{:.2f}', 'High': '{:.2f}', 'Low': '{:.2f}', 'Close': '{:.2f}', 'Volume': '{:,.0f}',
+            'SMA_5': '{:.2f}', 'SMA_20': '{:.2f}', 'SMA_60': '{:.2f}', 
+            'MACD': '{:.2f}', 'MACD_Signal': '{:.2f}', 'MACD_Hist': '{:.2f}', 
+            'RSI': '{:.2f}', 'STOCH_K': '{:.2f}', 'STOCH_D': '{:.2f}', 
+            'BB_High': '{:.2f}', 'BB_Low': '{:.2f}', 'BB_Mid': '{:.2f}',
+            'OBV': '{:,.0f}'
+        })) # 顯示最新 30 筆數據，並格式化數字
         
     else:
+        # 初始畫面或無數據時顯示
         st.markdown("---")
         st.subheader("歡迎使用 AI 頂級專家 四維度趨勢分析平台")
         st.markdown(f"請在左側欄設定標的代碼（例如 **TSLA**, **2330.TW**, **BTC-USD**），然後點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span> 按鈕開始。", unsafe_allow_html=True)
