@@ -6,16 +6,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ta
 import warnings
-import json
 import time
 import re 
 from datetime import datetime, timedelta
-
-# 為了在 Canvas 環境中模擬 API 金鑰
-# 實際執行時，Canvas 會自動注入 API 金鑰
-API_KEY = ""
-GEMINI_MODEL_TEXT = "gemini-2.5-flash-preview-05-20" 
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL_TEXT}:generateContent?key={API_KEY}"
 
 warnings.filterwarnings('ignore')
 
@@ -30,7 +23,6 @@ st.set_page_config(
 )
 
 # 週期映射：(YFinance Period, YFinance Interval)
-# 確保 4 小時使用 60m 的 interval，並使用 1y period 獲取足夠數據
 PERIOD_MAP = { 
     "30 分": ("60d", "30m"), 
     "4 小時": ("1y", "60m"), 
@@ -38,537 +30,414 @@ PERIOD_MAP = {
     "1 週": ("max", "1wk")
 }
 
-# 🚀 您的【所有資產清單】 (簡化版)
+# 🚀 您的【所有資產清單】
 FULL_SYMBOLS_MAP = {
+    # ----------------------------------------------------
+    # A. 美股核心 (US Stocks) - 個股
+    # ----------------------------------------------------
     "TSLA": {"name": "特斯拉", "keywords": ["特斯拉", "電動車", "TSLA", "Tesla"]},
     "NVDA": {"name": "輝達", "keywords": ["輝達", "英偉達", "AI", "NVDA", "Nvidia"]},
-    "AAPL": {"name": "蘋果", "keywords": ["蘋果", "手機", "AAPL", "Apple"]},
+    "AAPL": {"name": "蘋果", "keywords": ["蘋果", "iPhone", "AAPL", "Apple"]},
+    "MSFT": {"name": "微軟", "keywords": ["微軟", "雲端", "MSFT", "Microsoft"]},
     "GOOG": {"name": "Google", "keywords": ["谷歌", "Alphabet", "GOOG"]},
-    "2330.TW": {"name": "台積電", "keywords": ["台積電", "晶圓", "2330", "TSMC", "TW"]},
-    "0050.TW": {"name": "元大台灣50", "keywords": ["0050", "ETF", "台灣50", "TW"]},
-    "BTC-USD": {"name": "比特幣", "keywords": ["比特幣", "加密貨幣", "BTC"]},
-    "ETH-USD": {"name": "以太坊", "keywords": ["以太坊", "加密貨幣", "ETH"]},
+    "AMZN": {"name": "亞馬遜", "keywords": ["亞馬遜", "電商", "AMZN", "Amazon"]},
+    # ----------------------------------------------------
+    # B. 台股核心 (Taiwan Stocks) - 個股 (使用 .TW 後綴)
+    # ----------------------------------------------------
+    "2330.TW": {"name": "台積電", "keywords": ["台積電", "晶圓", "2330"]},
+    "2454.TW": {"name": "聯發科", "keywords": ["聯發科", "IC設計", "2454"]},
+    "2317.TW": {"name": "鴻海", "keywords": ["鴻海", "電子代工", "2317"]},
+    # ----------------------------------------------------
+    # C. 加密貨幣 (Crypto) - (使用 -USD 後綴)
+    # ----------------------------------------------------
+    "BTC-USD": {"name": "比特幣", "keywords": ["比特幣", "BTC", "Bitcoin"]},
+    "ETH-USD": {"name": "以太幣", "keywords": ["以太幣", "ETH", "Ethereum"]},
 }
 
+# 將 FULL_SYMBOLS_MAP 拆分為子類別，用於快速選擇
+US_STOCKS_MAP = {k: v for k, v in FULL_SYMBOLS_MAP.items() if not k.endswith(".TW") and not k.endswith("-USD")}
+TW_STOCKS_MAP = {k: v for k, v in FULL_SYMBOLS_MAP.items() if k.endswith(".TW")}
+CRYPTO_MAP = {k: v for k, v in FULL_SYMBOLS_MAP.items() if k.endswith("-USD")}
+
 # ==============================================================================
-# 2. 數據獲取與處理
+# 2. 資料獲取函式 (增加重試機制以提高穩定性)
 # ==============================================================================
 
-@st.cache_data(ttl=600) # 緩存數據 10 分鐘
-def get_yfinance_data(symbol, period, interval):
+def get_data(symbol, period_key, progress_bar, max_retries=3):
     """
-    從 yfinance 獲取歷史價格數據。
-    """
-    try:
-        # 檢查是否為台股代碼，如果是則加上 .TW 後綴 (如果用戶忘記)
-        if symbol.isdigit() and not symbol.endswith(('.TW', '.US', '-USD')):
-            symbol_to_fetch = f"{symbol}.TW"
-        else:
-            symbol_to_fetch = symbol.upper()
-
-        data = yf.download(
-            symbol_to_fetch, 
-            period=period, 
-            interval=interval, 
-            progress=False, 
-            show_errors=False
-        )
-        
-        if data.empty:
-            st.error(f"⚠️ 找不到代碼 `{symbol_to_fetch}` 的數據，請檢查代碼是否正確。")
-            return None, symbol_to_fetch
-        
-        # 重新命名列，以符合 ta 庫的標準，並確保都是 float
-        data.columns = [col.capitalize() for col in data.columns]
-        data = data[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-        
-        # 移除任何重複的索引 (可能在某些時間區間出現)
-        data = data[~data.index.duplicated(keep='first')]
-        
-        return data, symbol_to_fetch
-
-    except Exception as e:
-        st.error(f"獲取 `{symbol}` 數據時發生錯誤: {e}")
-        return None, symbol.upper()
-
-def calculate_technical_indicators(df):
-    """
-    計算並添加技術指標到 DataFrame。
-    確保傳遞給 ta 庫的 'Close'/'Volume' 是單一 Pandas Series (1D 結構)
-    """
-    if df is None or df.empty:
-        return None
+    從 yfinance 獲取歷史股價資料，包含指數退避重試機制。
     
-    try:
-        # 1. 數據清理：替換無限值為 NaN
-        df.replace([np.inf, -np.inf], np.nan, inplace=True)
-
-        # 確保我們操作的是 Pandas Series，防止傳遞多維數據給 ta 庫
-        close_series = df['Close']
-        high_series = df['High']
-        low_series = df['Low']
-        volume_series = df['Volume']
+    Args:
+        symbol (str): 股票代碼。
+        period_key (str): 選擇的分析週期鍵 (e.g., "1 日")。
+        progress_bar (st.progress): Streamlit 進度條物件。
+        max_retries (int): 最大重試次數。
         
-        # === 趨勢指標 (Trend Indicators) ===
-        # Simple Moving Average (SMA)
-        df['SMA_5'] = ta.trend.sma_indicator(close=close_series, window=5, fillna=True)
-        df['SMA_20'] = ta.trend.sma_indicator(close=close_series, window=20, fillna=True)
-        df['SMA_60'] = ta.trend.sma_indicator(close=close_series, window=60, fillna=True)
-
-        # Moving Average Convergence Divergence (MACD)
-        macd = ta.trend.MACD(close=close_series, window_fast=12, window_slow=26, window_sign=9, fillna=True)
-        df['MACD'] = macd.macd()
-        df['MACD_Signal'] = macd.macd_signal()
-        df['MACD_Hist'] = macd.macd_diff()
-
-        # === 動量指標 (Momentum Indicators) ===
-        # Relative Strength Index (RSI)
-        df['RSI'] = ta.momentum.rsi(close=close_series, window=14, fillna=True)
-        
-        # Stochastic Oscillator (STOCH)
-        stoch = ta.momentum.StochasticOscillator(high=high_series, low=low_series, close=close_series, window=14, smooth_window=3, fillna=True)
-        df['STOCH_K'] = stoch.stoch()
-        df['STOCH_D'] = stoch.stoch_signal()
-        
-        # === 波動性指標 (Volatility Indicators) ===
-        # Bollinger Bands (BB)
-        bb = ta.volatility.BollingerBands(close=close_series, window=20, window_dev=2, fillna=True)
-        df['BB_High'] = bb.bollinger_hband()
-        df['BB_Low'] = bb.bollinger_lband()
-        df['BB_Mid'] = bb.bollinger_mavg()
-        
-        # === 交易量指標 (Volume Indicators) ===
-        # On-Balance Volume (OBV)
-        df['OBV'] = ta.volume.on_balance_volume(close=close_series, volume=volume_series, fillna=True)
-        
-        # 填充可能產生的 NaN 值 (如 SMA/BB 的初期值)
-        df.fillna(method='ffill', inplace=True)
-        df.fillna(method='bfill', inplace=True)
-
-        return df
+    Returns:
+        pd.DataFrame or None: 歷史股價資料。
+    """
+    period, interval = PERIOD_MAP.get(period_key, ("5y", "1d"))
     
-    except Exception as e:
-        # 如果在計算 TA 時發生錯誤，打印錯誤並返回 None
-        st.error(f"技術指標計算失敗，請檢查數據結構: {e}")
+    for attempt in range(max_retries):
+        progress_bar.progress(20 + (attempt * 10), text=f"📥 正在獲取 {symbol} ({period_key}) 歷史數據... (嘗試 {attempt + 1}/{max_retries})")
+        time.sleep(0.5)
+        
+        try:
+            # 確保使用正確的 yfinance 參數 (已移除 show_errors)
+            data = yf.download(symbol, period=period, interval=interval, progress=False, timeout=10)
+            
+            if data.empty:
+                # 代碼無效或無數據，不需重試
+                st.error(f"⚠️ **獲取 {symbol} 數據失敗:** 找不到該代碼的資料，請檢查代碼是否正確。")
+                progress_bar.empty()
+                return None
+            
+            # 數據成功獲取
+            progress_bar.progress(80, text=f"✅ 數據獲取成功！")
+            time.sleep(0.5)
+            
+            data.columns = [c.capitalize() for c in data.columns]
+            data = data.rename(columns={'Adj close': 'Adj_Close'})
+            data['Symbol'] = symbol
+            return data
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                # 執行指數退避
+                wait_time = 2 ** attempt  # 1, 2, 4 seconds
+                st.warning(f"網路或API錯誤，正在重試... (等待 {wait_time} 秒)")
+                time.sleep(wait_time)
+            else:
+                st.error(f"❌ **獲取 {symbol} 數據時發生嚴重錯誤:** 已達最大重試次數。錯誤訊息: {e}")
+                progress_bar.empty()
+                return None
+    return None
+
+# ==============================================================================
+# 3. 趨勢分析與指標計算 (新增成交量指標)
+# ==============================================================================
+
+def calculate_technical_indicators(data):
+    """計算技術指標 (RSI, MACD, Bollinger Bands, Volume SMA)"""
+    if data is None or data.empty:
         return None
 
-# ==============================================================================
-# 3. 圖表繪製
-# ==============================================================================
-
-def plot_candlestick(df, symbol, interval):
-    """
-    繪製 K 線圖、MACD、RSI、成交量等綜合圖表。
-    """
-    if df is None or df.empty:
-        return None
-
-    # 確保只取有數據的行
-    df = df.dropna()
-
-    fig = make_subplots(
-        rows=4, 
-        cols=1, 
-        shared_xaxes=True,
-        vertical_spacing=0.05,
-        row_heights=[0.55, 0.15, 0.15, 0.15],
-        subplot_titles=(
-            f'**{symbol} K 線圖與趨勢指標 ({interval})**', 
-            'MACD (趨勢動量)', 
-            'RSI (相對強弱指標)', 
-            '成交量與 OBV'
-        )
-    )
-
-    # 1. K 線圖 (Row 1)
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='K線',
-        increasing_line_color='red', 
-        decreasing_line_color='green'
-    ), row=1, col=1)
-
-    # SMA 趨勢線
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA_5'], line=dict(color='#8B008B', width=1), name='SMA 5'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], line=dict(color='#FFD700', width=1), name='SMA 20'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA_60'], line=dict(color='#4169E1', width=1), name='SMA 60'), row=1, col=1)
-
-    # 布林通道 (BB)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_High'], line=dict(color='rgba(135, 206, 235, 0.5)', width=1), name='BB 上軌'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Low'], line=dict(color='rgba(135, 206, 235, 0.5)', width=1), name='BB 下軌', fill='tonexty', fillcolor='rgba(135, 206, 235, 0.1)'), row=1, col=1)
-
-
-    # 2. MACD (Row 2)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#FFA500', width=1.5), name='MACD'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='#4682B4', width=1.5), name='Signal'), row=2, col=1)
-    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=['#FF4500' if v >= 0 else '#008000' for v in df['MACD_Hist']], name='Histogram'), row=2, col=1)
-
-
-    # 3. RSI (Row 3)
-    fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#DC143C', width=2), name='RSI'), row=3, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="#FA8072", row=3, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="#3CB371", row=3, col=1)
-    fig.update_yaxes(range=[0, 100], row=3, col=1)
-
-    # 4. 成交量與 OBV (Row 4)
-    colors = ['red' if df['Open'][i] < df['Close'][i] else 'green' for i in range(len(df))]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=4, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['OBV'], line=dict(color='#1E90FF', width=1.5), name='OBV', yaxis='y2'), row=4, col=1)
+    df = data.copy()
     
-    # 設置佈局
+    # 趨勢指標
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean()
+    
+    # 動量指標: RSI
+    df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
+    
+    # 動量指標: MACD
+    macd = ta.trend.MACD(df['Close'])
+    df['MACD'] = macd.macd()
+    df['MACD_Signal'] = macd.macd_signal()
+    df['MACD_Hist'] = macd.macd_diff()
+    
+    # 波動性指標: Bollinger Bands (布林帶)
+    bb = ta.volatility.BollingerBands(df['Close'])
+    df['BB_High'] = bb.bollinger_hband()
+    df['BB_Low'] = bb.bollinger_lband()
+    df['BB_Mid'] = bb.bollinger_mavg()
+    
+    # 成交量指標: 20日成交量均線
+    df['Volume_SMA_20'] = df['Volume'].rolling(window=20).mean()
+    
+    return df.dropna()
+
+def perform_ai_analysis(symbol, data):
+    """
+    模擬 AI 頂級專家的分析輸出
+    
+    結合了價格趨勢 (SMA), 動量 (RSI/MACD), 和 成交量 (Volume) 的簡化四維度分析
+    """
+    
+    st.subheader(f"目標標的：{symbol} ({data.index[-1].strftime('%Y-%m-%d')} 收盤價：${data['Close'].iloc[-1]:.2f})")
+    st.markdown("---")
+    
+    # --- 提取最新數據 ---
+    last_close = data['Close'].iloc[-1]
+    sma_20 = data['SMA_20'].iloc[-1]
+    sma_50 = data['SMA_50'].iloc[-1]
+    rsi = data['RSI'].iloc[-1]
+    macd_hist = data['MACD_Hist'].iloc[-1]
+    last_volume = data['Volume'].iloc[-1]
+    volume_sma_20 = data['Volume_SMA_20'].iloc[-1]
+    
+    # --- 1. 綜合趨勢評估 (模擬 AI 核心判斷) ---
+    
+    score = 0
+    analysis_points = []
+    
+    # A. 價格趨勢 (佔比最高)
+    if last_close > sma_20:
+        score += 3
+        analysis_points.append("📈 **價格趨勢 (SMA)**: 股價位於 20 日移動平均線之上，短期多頭結構確立。")
+    elif last_close < sma_20 and last_close > sma_50:
+        score += 1
+        analysis_points.append("⚠️ **價格趨勢 (SMA)**: 股價跌破短期 (SMA 20) 支撐，但仍守住中期 (SMA 50) 關鍵支撐。")
+    else:
+        score -= 2
+        analysis_points.append("🔻 **價格趨勢 (SMA)**: 股價跌破短期與中期均線，空頭壓力較大。")
+
+    # B. 動量指標 (RSI)
+    if rsi >= 70:
+        score -= 1
+        analysis_points.append(f"🔴 **動量 (RSI)**: RSI 進入超買區 ({rsi:.1f})，短線有回調風險。")
+    elif rsi <= 30:
+        score += 1
+        analysis_points.append(f"🟢 **動量 (RSI)**: RSI 進入超賣區 ({rsi:.1f})，可能醞釀技術性反彈。")
+    else:
+        score += 0.5
+        analysis_points.append(f"🟡 **動量 (RSI)**: RSI 處於中性健康區 ({rsi:.1f})，動能均衡。")
+
+    # C. MACD
+    if macd_hist > 0:
+        score += 2
+        analysis_points.append("✅ **動量 (MACD)**: MACD 柱狀圖為正，動能持續增強，處於金叉後的擴張階段。")
+    else:
+        score -= 1
+        analysis_points.append("❌ **動量 (MACD)**: MACD 柱狀圖為負，動能減弱或處於死叉後的收縮階段。")
+
+    # D. 成交量 (Volume) - 模擬籌碼/資金流
+    if last_volume > volume_sma_20 and last_close > data['Close'].iloc[-2]:
+        score += 2
+        analysis_points.append("💰 **成交量/資金流**: 股價上漲配合成交量顯著放大，顯示**資金追捧積極**。")
+    elif last_volume > volume_sma_20 and last_close < data['Close'].iloc[-2]:
+        score -= 1
+        analysis_points.append("💧 **成交量/資金流**: 股價下跌但成交量放大，顯示**市場恐慌性賣壓或資金流出**。")
+    else:
+        analysis_points.append("⚪ **成交量/資金流**: 成交量處於正常水準，市場情緒穩定。")
+
+    # --- 2. 總結判斷與交易策略 ---
+    
+    if score >= 4:
+        tech_advice = "🟢 **強烈買入/重倉持有**"
+        tech_summary = "綜合評估結果：趨勢、動量、資金流向均表現強勁，屬於極佳的多頭配置。建議積極持有，並將短期停損點設在 20 日均線附近。"
+    elif score >= 1:
+        tech_advice = "🟡 **買入/持續觀察**"
+        tech_summary = "綜合評估結果：趨勢結構良好，但部分動量指標（如 RSI）或資金流略有分歧。建議輕倉佈局或等待回調至關鍵支撐位 (如 SMA 50) 時再加倉。"
+    else:
+        tech_advice = "🔴 **觀望/賣出**"
+        tech_summary = "綜合評估結果：趨勢結構已遭破壞，且動量/資金流顯示賣壓主導。建議避免建倉，或等待價格重新站上短期均線後再行考慮。"
+
+    # --- 輸出結果 ---
+    st.markdown("#### 1. AI 綜合趨勢評估 (四維度解析)")
+    st.info(f"**最終交易建議：{tech_advice}**")
+    st.markdown(tech_summary)
+    
+    st.markdown("##### 核心分析觀點：")
+    for point in analysis_points:
+        st.markdown(f"- {point}")
+    
+    st.markdown("---")
+    
+    # --- 3. 圖表展示 ---
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.08, # 調整垂直間距
+                        row_heights=[0.5, 0.15, 0.15, 0.2]) # 增加 Volume Row
+    
+    # K線圖與均線
+    fig.add_trace(go.Candlestick(x=data.index,
+                                 open=data['Open'], high=data['High'],
+                                 low=data['Low'], close=data['Close'],
+                                 name='K線'), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(x=data.index, y=data['SMA_20'], line=dict(color='blue', width=1), name='SMA 20'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['SMA_50'], line=dict(color='orange', width=1), name='SMA 50'), row=1, col=1)
+    
+    # MACD 圖
+    colors_macd = ['green' if val >= 0 else 'red' for val in data['MACD_Hist']]
+    fig.add_trace(go.Bar(x=data.index, y=data['MACD_Hist'], name='MACD 柱狀圖', marker_color=colors_macd), row=2, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['MACD'], line=dict(color='blue', width=1), name='MACD 線'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], line=dict(color='red', width=1), name='Signal 線'), row=2, col=1)
+    
+    # RSI 圖
+    fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], line=dict(color='purple', width=1), name='RSI'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=[70]*len(data), line=dict(color='red', width=0.5, dash='dash'), name='超買(70)', showlegend=False), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=[30]*len(data), line=dict(color='green', width=0.5, dash='dash'), name='超賣(30)', showlegend=False), row=3, col=1)
+
+    # Volume 圖 (新增的第四維度)
+    colors_volume = ['green' if data['Close'].iloc[i] >= data['Open'].iloc[i] else 'red' for i in range(len(data))]
+    fig.add_trace(go.Bar(x=data.index, y=data['Volume'], name='成交量', marker_color=colors_volume), row=4, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['Volume_SMA_20'], line=dict(color='gray', width=1, dash='dot'), name='Volume SMA 20'), row=4, col=1)
+    
+    # 更新佈局
     fig.update_layout(
-        title_text=f"**{symbol} 四維度技術分析總覽**",
+        title=f'{symbol} - 價格、動量與成交量趨勢分析',
         xaxis_rangeslider_visible=False,
         height=900,
-        template="plotly_dark",
-        margin=dict(l=20, r=20, t=60, b=20),
-        hovermode="x unified"
+        hovermode="x unified",
+        margin=dict(l=10, r=10, t=30, b=10),
     )
-
-    # 更新 Row 1 的 Y 軸
-    fig.update_yaxes(title_text="價格", row=1, col=1)
-
-    # 更新 Row 4 的 Y 軸以添加第二個軸（給 OBV）
-    fig.update_layout(
-        yaxis4=dict(
-            title="OBV",
-            overlaying="y",
-            side="right"
-        )
-    )
-
-    # 隱藏範圍滑塊
-    fig.update_layout(xaxis_rangeslider_visible=False)
     
-    # 清理不必要的圖例
-    for i in [1, 2, 3, 4]:
-        fig.update_xaxes(showgrid=True, row=i, col=1)
-        fig.update_yaxes(showgrid=True, row=i, col=1)
-        
-    fig.update_traces(showlegend=True)
+    fig.update_yaxes(title_text="價格", row=1, col=1)
+    fig.update_yaxes(title_text="MACD", row=2, col=1)
+    fig.update_yaxes(title_text="RSI", row=3, col=1)
+    fig.update_yaxes(title_text="成交量", row=4, col=1)
     
     st.plotly_chart(fig, use_container_width=True)
 
-
 # ==============================================================================
-# 4. AI 分析與 LLM 互動 (模擬)
-# ==============================================================================
-
-async def retry_fetch(url, payload, retries=3, delay=1.0):
-    """Implement exponential backoff retry for fetch operations."""
-    headers = {'Content-Type': 'application/json'}
-    for i in range(retries):
-        try:
-            # 使用 Streamlit 內建的運行時上下文執行 fetch
-            # st.runtime.scriptrunner.add_script_run_ctx(fetch) 僅在 Streamlit 環境中可用
-            response = await st.runtime.scriptrunner.add_script_run_ctx(
-                fetch
-            )(url, method='POST', headers=headers, body=json.dumps(payload))
-            if response.status == 200:
-                return await response.json()
-            
-            await time.sleep(delay * (2 ** i)) 
-        except Exception as e:
-            # print(f"Attempt {i+1} failed: {e}") # 避免在控制台記錄重試錯誤
-            await time.sleep(delay * (2 ** i))
-    raise Exception(f"Failed to fetch content after {retries} retries.")
-
-
-def generate_analysis_payload(symbol, interval, latest_data_summary, indicators_summary):
-    """
-    構建 LLM 的 API 請求 payload。
-    """
-    
-    system_prompt = (
-        "您是一位頂級的量化分析師，擁有 20 年的交易經驗。您的任務是結合基本面（通過 Google Search 獲取）、"
-        "技術面和市場情緒，為用戶提供一個全面且精準的四維度趨勢分析。 "
-        "請根據提供的數據摘要和技術指標，以專業、簡潔、有邏輯的方式進行分析，並給出明確的交易建議（買入/賣出/觀望）。"
-        "請使用繁體中文輸出。分析內容應包含：1. 技術面簡述 2. 宏觀/基本面（基於外部搜索） 3. 交易建議與風險提示。"
-    )
-
-    # 獲取標的名稱，用於更準確的搜索
-    symbol_name = get_symbol_name(symbol)
-    if symbol_name != symbol:
-        search_term = f"{symbol_name} ({symbol})"
-    else:
-        search_term = symbol
-
-    user_query = (
-        f"請針對標的 {search_term} (週期: {interval}) 進行四維度趨勢分析。\n\n"
-        f"【最新數據摘要】:\n{latest_data_summary}\n\n"
-        f"【技術指標趨勢摘要】:\n{indicators_summary}\n\n"
-        f"請務必利用 Google Search 工具，獲取 {search_term} 的最新財報或重大新聞，並將其融入分析報告中。"
-    )
-
-    payload = {
-        "contents": [{"parts": [{"text": user_query}]}],
-        # 啟用 Google Search 進行基本面和消息面分析
-        "tools": [{"google_search": {} }],
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-    }
-    return payload
-
-
-async def generate_ai_analysis(symbol, interval, df):
-    """
-    調用 Gemini API 進行趨勢分析，並處理結果和引用來源。
-    """
-    if df is None or df.empty:
-        return "無法生成分析：數據為空。"
-
-    
-    # 創建數據摘要
-    latest_row = df.iloc[-1]
-    
-    latest_data_summary = f"""
-- 最新收盤價 (Close): {latest_row['Close']:.2f}
-- 20 日均價 (SMA 20): {latest_row['SMA_20']:.2f}
-- 20 日布林通道上軌 (BB High): {latest_row['BB_High']:.2f}
-- RSI (14): {latest_row['RSI']:.2f} (一般認為 <30 超賣, >70 超買)
-- MACD 柱狀圖 (Hist): {latest_row['MACD_Hist']:.2f} (一般認為 >0 動能強勁)
-    """
-
-    # 趨勢判斷邏輯 (簡化為 LLM 提供上下文)
-    trend_data = {
-        'SMA5_Above_SMA20': latest_row['SMA_5'] > latest_row['SMA_20'],
-        'MACD_Positive': latest_row['MACD_Hist'] > 0,
-        'RSI_Level': '超賣 (<30)' if latest_row['RSI'] < 30 else ('超買 (>70)' if latest_row['RSI'] > 70 else '中性 (30-70)'),
-        'Price_Near_BB_High': latest_row['Close'] >= latest_row['BB_High']
-    }
-    
-    indicators_summary = f"""
-- 短期均線 (SMA 5) {'高於' if trend_data['SMA5_Above_SMA20'] else '低於'} 中期均線 (SMA 20)，顯示短期趨勢 {'看漲' if trend_data['SMA5_Above_SMA20'] else '看跌'}。
-- MACD 柱狀圖 {'為正值' if trend_data['MACD_Positive'] else '為負值'}，動量顯示 {'多頭佔優' if trend_data['MACD_Positive'] else '空頭佔優'}。
-- RSI 位於 {trend_data['RSI_Level']} 區域。
-- 價格 {'正在觸及或突破' if trend_data['Price_Near_BB_High'] else '位於'} 布林通道上軌。
-    """
-
-    payload = generate_analysis_payload(symbol, interval, latest_data_summary, indicators_summary)
-    
-    analysis_container = st.empty() # 創建一個空的容器來顯示結果
-    analysis_container.subheader(f"🧠 AI 頂級專家分析報告 - {symbol} ({interval})")
-    
-    try:
-        # 使用 Streamlit 內建的運行時上下文執行 fetch
-        with analysis_container.spinner("🤖 AI 正在整合基本面、技術面和宏觀消息進行深度分析..."):
-            response_json = await retry_fetch(GEMINI_API_URL, payload)
-        
-        # 清除 Spinner 和標題
-        analysis_container.empty()
-        st.subheader(f"🧠 AI 頂級專家分析報告 - {symbol} ({interval})")
-
-
-        if response_json and response_json.get('candidates'):
-            candidate = response_json['candidates'][0]
-            text = candidate['content']['parts'][0]['text']
-            
-            # 提取引用來源
-            sources = []
-            grounding_metadata = candidate.get('groundingMetadata')
-            if grounding_metadata and grounding_metadata.get('groundingAttributions'):
-                sources = [
-                    {
-                        'uri': attr['web']['uri'],
-                        'title': attr['web']['title']
-                    }
-                    for attr in grounding_metadata['groundingAttributions']
-                    if attr.get('web') and attr['web'].get('uri') and attr['web'].get('title')
-                ]
-            
-            st.markdown(text)
-            
-            if sources:
-                st.markdown("---")
-                st.subheader("📚 資訊來源 (消息面/基本面)")
-                source_markdown = ""
-                # 使用 set 避免重複的 URI
-                unique_sources = set()
-                for source in sources:
-                    if source['uri'] not in unique_sources:
-                         source_markdown += f"- **[{source['title']}]({source['uri']})**\n"
-                         unique_sources.add(source['uri'])
-                st.markdown(source_markdown)
-        else:
-            st.warning("AI 分析服務暫時無法回應。")
-            
-    except Exception as e:
-        st.error(f"AI 分析服務調用失敗: {e}")
-
-# ==============================================================================
-# 5. Streamlit 主程式
+# 4. Streamlit 介面與邏輯 (UI狀態優化)
 # ==============================================================================
 
-def get_symbol_name(symbol):
-    """根據代碼獲取中文名稱"""
-    for data in FULL_SYMBOLS_MAP.values():
-        # 檢查關鍵詞中是否包含代碼（忽略大小寫）
-        if data['keywords'] and symbol.upper() in [k.upper() for k in data['keywords']]:
-            return data['name']
+# Helper function to update the manual search input state
+def update_search_input_us():
+    """Callback function for US stock quick select."""
+    st.session_state['sidebar_search_input'] = st.session_state.quick_select_us
+
+def update_search_input_tw():
+    """Callback function for TW stock quick select."""
+    st.session_state['sidebar_search_input'] = st.session_state.quick_select_tw
+
+def update_search_input_crypto():
+    """Callback function for Crypto quick select."""
+    st.session_state['sidebar_search_input'] = st.session_state.quick_select_crypto
     
-    # 處理特殊情況：如果 yfinance 提取的代碼帶有後綴
-    symbol_parts = symbol.split('.')
-    if len(symbol_parts) > 1:
-        base_symbol = symbol_parts[0]
-        for data in FULL_SYMBOLS_MAP.values():
-            if data['keywords'] and base_symbol.upper() in [k.upper() for k in data['keywords']]:
-                return data['name']
-
-    return symbol
-
-
-def main():
-    # 初始化 Session State
+def sidebar_ui():
+    """側邊欄 UI 元素和狀態管理"""
+    st.sidebar.header("📈 參數設定")
+    
+    # 初始化 Session State - 確保所有鍵都存在
     if 'last_search_symbol' not in st.session_state:
         st.session_state['last_search_symbol'] = "2330.TW"
     if 'data_ready' not in st.session_state:
         st.session_state['data_ready'] = False
     if 'sidebar_search_input' not in st.session_state:
-        st.session_state['sidebar_search_input'] = ""
-    if 'current_symbol' not in st.session_state:
-        st.session_state['current_symbol'] = "2330.TW"
-    if 'current_interval' not in st.session_state:
-        st.session_state['current_interval'] = "1 日"
-    if 'analysis_started' not in st.session_state:
-        st.session_state['analysis_started'] = False
+        st.session_state['sidebar_search_input'] = st.session_state['last_search_symbol']
+    if 'current_asset_class' not in st.session_state:
+        st.session_state['current_asset_class'] = "台股" # 根據預設值初始化
 
-
-    # 側邊欄 (Sidebar) 設置
-    st.sidebar.title("📈 參數設定")
-
-    # 1. 資產類別選擇 (簡化，主要影響推薦列表，實際仍靠代碼)
-    current_symbol_upper = st.session_state['current_symbol'].upper()
-    default_asset_index = 0
-    if current_symbol_upper.endswith('-USD'):
-        default_asset_index = 2
-    elif not any(suffix in current_symbol_upper for suffix in ['.TW', '.US', '-USD']):
-        # 假設沒有後綴的默認為美股 (US)
-        default_asset_index = 1 
-    elif current_symbol_upper.endswith('.TW'):
-        default_asset_index = 0
-    
-    asset_class = st.sidebar.selectbox(
-        "選擇資產類別",
-        ["台股", "美股", "加密貨幣"],
+    # 根據當前輸入代碼判斷應選中的資產類別索引 (用於 Radio Button)
+    current_input = st.session_state['sidebar_search_input'].upper().strip()
+    if current_input in US_STOCKS_MAP or not (current_input.endswith(".TW") or current_input.endswith("-USD")):
+        default_asset_index = 0  # 美股/其他
+    elif current_input in TW_STOCKS_MAP or current_input.endswith(".TW"):
+        default_asset_index = 1  # 台股
+    elif current_input in CRYPTO_MAP or current_input.endswith("-USD"):
+        default_asset_index = 2  # 加密貨幣
+    else:
+        # Fallback to current state if symbol is custom/unknown
+        if st.session_state['current_asset_class'] == "美股":
+            default_asset_index = 0
+        elif st.session_state['current_asset_class'] == "台股":
+            default_asset_index = 1
+        else:
+            default_asset_index = 2
+        
+    # 1. 選擇資產類別
+    asset_class = st.sidebar.radio(
+        "選擇資產類別", 
+        ["美股", "台股", "加密貨幣"], 
+        key="asset_class_radio",
         index=default_asset_index
     )
+    # 更新當前資產類別到 Session State
+    st.session_state['current_asset_class'] = asset_class
 
-    # 2. 快速選擇標的 (簡化，僅供參考)
-    default_symbols = {
-        "美股": ["TSLA", "NVDA", "AAPL", "GOOG"],
-        "台股": ["2330.TW", "0050.TW"],
-        "加密貨幣": ["BTC-USD", "ETH-USD"]
-    }.get(asset_class, [])
 
-    # 確保當前標的在快速選擇列表中時被選中
-    quick_select_index = 0
-    if st.session_state['current_symbol'] in default_symbols:
-        quick_select_index = default_symbols.index(st.session_state['current_symbol']) + 1
+    # 2. 快速選擇標的 (動態顯示)
+    st.sidebar.markdown("---")
+    
+    if asset_class == "美股":
+        map_to_use = US_STOCKS_MAP
+        update_func = update_search_input_us
+        key_select = "quick_select_us"
+    elif asset_class == "台股":
+        map_to_use = TW_STOCKS_MAP
+        update_func = update_search_input_tw
+        key_select = "quick_select_tw"
+    else:
+        map_to_use = CRYPTO_MAP
+        update_func = update_search_input_crypto
+        key_select = "quick_select_crypto"
 
-    quick_select = st.sidebar.selectbox(
+    options_keys = list(map_to_use.keys())
+    
+    # 根據當前輸入值設置快速選擇的預設索引
+    try:
+        default_index = options_keys.index(current_input)
+    except ValueError:
+        # 如果當前輸入不在快速選擇列表中，則選中第一個選項
+        default_index = 0
+    
+    st.sidebar.selectbox(
         f"快速選擇標的 ({asset_class})",
-        [""] + default_symbols,
-        index=quick_select_index
+        options=options_keys,
+        index=default_index,
+        key=key_select,
+        on_change=update_func 
     )
 
-    # 3. 手動輸入代碼 (核心輸入)
-    default_input = st.session_state['sidebar_search_input'] if st.session_state['sidebar_search_input'] else st.session_state['current_symbol']
-    
-    manual_input = st.sidebar.text_input(
-        "或手動輸入代碼 (例如: GOOG, 2330.TW, BTC-USD)",
-        value=default_input
+    # 3. 手動輸入代碼 (使用 Session State 控制 value)
+    st.session_state['sidebar_search_input'] = st.sidebar.text_input(
+        "或手動輸入代碼 (例如: GOOG, 2330.TW, BTC-USD)：",
+        value=st.session_state['sidebar_search_input'], # 綁定 Session State
+        key="manual_search_input_final_key"
     )
-    
-    # 處理輸入邏輯
-    search_symbol = quick_select if quick_select else manual_input.upper()
-    
-    # 4. 分析週期選擇
-    interval_options = list(PERIOD_MAP.keys())
-    
-    selected_interval = st.sidebar.selectbox(
-        "選擇分析週期",
-        interval_options,
-        index=interval_options.index(st.session_state['current_interval'])
-    )
-    
-    # 5. 執行按鈕
-    # 點擊按鈕後才執行數據獲取和分析
-    if st.sidebar.button("📊 執行AI分析", key="run_analysis", type="primary"):
-        if not search_symbol:
-            st.sidebar.error("請輸入或選擇標的代碼。")
-        else:
-            st.session_state['data_ready'] = False
-            st.session_state['last_search_symbol'] = search_symbol
-            st.session_state['current_interval'] = selected_interval # 更新週期
-            st.session_state['analysis_started'] = True
-            st.rerun() # 重新運行以獲取數據並顯示結果
 
-    # --- 主要內容區 ---
+    # 4. 選擇分析週期
+    period_selection = st.sidebar.radio(
+        "選擇分析週期", 
+        list(PERIOD_MAP.keys()),
+        key="period_selection"
+    )
+    
+    st.sidebar.markdown("---")
+    
+    # 執行按鈕
+    if st.sidebar.button('📊 執行AI分析', type="primary", use_container_width=True):
+        st.session_state['data_ready'] = True
+        st.session_state['last_search_symbol'] = st.session_state['sidebar_search_input'].upper().strip() # 確定最終使用的代碼
+    
+    return st.session_state['last_search_symbol'], st.session_state['period_selection']
+
+def main():
+    """主應用程式邏輯"""
+    
+    symbol, period_key = sidebar_ui()
+    
     st.title("📈 AI 頂級專家 四維度趨勢分析平台")
-
-    # 獲取和處理數據
-    symbol_to_process = st.session_state['last_search_symbol']
-    interval_to_process = st.session_state['current_interval']
     
-    if st.session_state['analysis_started'] and symbol_to_process:
-        period, interval_yf = PERIOD_MAP[interval_to_process]
+    # 設置頂部標題和參數顯示
+    st.markdown(f"#### 目標標的：{symbol} ({period_key} 週期)")
+    
+    # 初始化進度條
+    progress_bar = st.empty()
+    progress_bar.progress(0, text="等待執行分析...")
+    
+    if st.session_state.get('data_ready', False) and st.session_state['last_search_symbol']:
+        # 獲取資料
+        data = get_data(st.session_state['last_search_symbol'], period_key, progress_bar)
         
-        # 顯示目標標的資訊
-        st.markdown(f"目標標的：**{get_symbol_name(symbol_to_process)}** (`{symbol_to_process}` - {interval_to_process} 週期)")
+        progress_bar.progress(100, text="🚀 分析完成，正在生成報告...")
+        time.sleep(0.5)
+        progress_bar.empty()
 
-        # 獲取數據
-        with st.spinner(f"正在從 Yahoo Finance 獲取 `{symbol_to_process}` 的歷史數據..."):
-            df_raw, fetched_symbol = get_yfinance_data(symbol_to_process, period, interval_yf)
-        
-        if df_raw is not None and not df_raw.empty:
-            # 計算技術指標
-            with st.spinner("正在計算技術指標 (TA)..."):
-                df_with_ta = calculate_technical_indicators(df_raw.copy())
+        if data is not None:
+            # 計算指標並執行分析
+            analyzed_data = calculate_technical_indicators(data)
             
-            if df_with_ta is not None:
-                st.session_state['data_ready'] = True
-                st.session_state['processed_df'] = df_with_ta
-                st.session_state['fetched_symbol'] = fetched_symbol
+            # 確保有足夠的數據進行計算（例如 SMA 200 需要 200 筆數據）
+            if analyzed_data is not None and len(analyzed_data) > 0:
+                perform_ai_analysis(st.session_state['last_search_symbol'], analyzed_data)
             else:
-                st.session_state['data_ready'] = False
-        else:
-             st.session_state['data_ready'] = False
+                 st.error(f"⚠️ **分析資料不足:** {st.session_state['last_search_symbol']} 在所選週期 ({period_key}) 內沒有足夠的數據來計算所有指標 (例如 SMA 200)，請嘗試更長的週期。")
 
-
-    # 顯示結果
-    if st.session_state['data_ready'] and 'processed_df' in st.session_state:
-        df_display = st.session_state['processed_df']
-        fetched_symbol = st.session_state['fetched_symbol']
-
-        # 1. 繪製圖表
-        plot_candlestick(df_display, get_symbol_name(fetched_symbol), interval_to_process)
-
-        # 2. 執行 AI 分析 (使用 await 調用非同步函數)
-        st.markdown("---")
-        
-        # 使用 Streamlit 的非同步執行器來運行 AI 分析
-        # 注意：Streamlit run_in_thread 接受同步函數，但我們在 Streamlit 環境中模擬 await fetch，所以保持結構不變
-        st.run_in_thread(generate_ai_analysis(fetched_symbol, interval_to_process, df_display))
-
-        st.markdown("---")
-        st.subheader("📊 原始數據表 (含技術指標)")
-        st.dataframe(df_display.tail(30).style.format({
-            'Open': '{:.2f}', 'High': '{:.2f}', 'Low': '{:.2f}', 'Close': '{:.2f}', 'Volume': '{:,.0f}',
-            'SMA_5': '{:.2f}', 'SMA_20': '{:.2f}', 'SMA_60': '{:.2f}', 
-            'MACD': '{:.2f}', 'MACD_Signal': '{:.2f}', 'MACD_Hist': '{:.2f}', 
-            'RSI': '{:.2f}', 'STOCH_K': '{:.2f}', 'STOCH_D': '{:.2f}', 
-            'BB_High': '{:.2f}', 'BB_Low': '{:.2f}', 'BB_Mid': '{:.2f}',
-            'OBV': '{:,.0f}'
-        })) # 顯示最新 30 筆數據，並格式化數字
+            # 重設 data_ready 狀態以允許下次執行
+            st.session_state['data_ready'] = False 
         
     else:
-        # 初始畫面或無數據時顯示
+        progress_bar.empty()
+        # 初始歡迎畫面
         st.markdown("---")
-        st.subheader("歡迎使用 AI 頂級專家 四維度趨勢分析平台")
-        st.markdown(f"請在左側欄設定標的代碼（例如 **TSLA**, **2330.TW**, **BTC-USD**），然後點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span> 按鈕開始。", unsafe_allow_html=True)
+        st.markdown(f"## 歡迎使用 AI 頂級專家 四維度趨勢分析平台")
+        st.markdown(f"請在左側欄設定標的代碼（例如 **{', '.join(US_STOCKS_MAP.keys())}**、**{', '.join(TW_STOCKS_MAP.keys())}**、**{', '.join(CRYPTO_MAP.keys())}**），然後點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span> 按鈕開始。", unsafe_allow_html=True)
         
         st.markdown("---")
         
