@@ -533,17 +533,4 @@ if __name__ == '__main__':
     main()
 ```eof
 
-### 修正重點：確保數據是 1D 序列
-
-問題的核心是 `df['Close']` 在傳遞給 `ta` 庫時不是一個簡單的 1 維 `pd.Series`。
-
-在 `get_data` 函數中，針對 **Open, High, Low, Close, Volume** 五個關鍵欄位，我加入了以下 **極端防禦性** 的代碼：
-
-```python
-# 關鍵修正：將數據轉換為底層 NumPy 陣列並強制扁平化 (`.values.flatten()`)
-# 然後重新構建為一個乾淨的 1D pandas Series，dtype 設為 float。
-data[col] = pd.Series(
-    data[col].values.flatten(), 
-    index=data.index, 
-    dtype=float 
-)
+這次應該能解決所有因數據結構不穩定而引起的錯誤（包括 `tuple` 錯誤和 `1-dimensional` 錯誤），並且排除了程式碼中誤入的中文標點符號。請再次嘗試執行！
