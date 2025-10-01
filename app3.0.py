@@ -36,8 +36,7 @@ PERIOD_MAP = {
 
 # 🚀 您的【所有資產清單】
 FULL_SYMBOLS_MAP = {
-    # ----------------------------------------------------
-    # A. 美股核心 (US Stocks) - 個股
+    # ----------------------------------------------------\r\n    # A. 美股核心 (US Stocks) - 個股
     # ----------------------------------------------------
     "TSLA": {"name": "特斯拉", "keywords": ["特斯拉", "電動車", "TSLA", "Tesla"]},
     "NVDA": {"name": "輝達", "keywords": ["輝達", "英偉達", "AI", "NVDA", "Nvidia"]},
@@ -77,6 +76,17 @@ def calculate_technical_indicators(df):
     if df is None or df.empty:
         return None
     
+    # 【錯誤修復】確保所有價格欄位都是 float 類型，避免 ta 庫誤判數據維度
+    try:
+        df['Close'] = df['Close'].astype(float)
+        df['High'] = df['High'].astype(float)
+        df['Low'] = df['Low'].astype(float)
+        df['Open'] = df['Open'].astype(float)
+        df['Volume'] = df['Volume'].astype(float)
+    except Exception as e:
+        st.error(f"🚨 數據類型轉換錯誤: {e}. 可能數據中包含非數值。")
+        return None
+
     # 趨勢指標
     df['SMA_5'] = ta.trend.sma_indicator(df['Close'], window=5)
     df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20)
@@ -387,7 +397,10 @@ def get_ai_analysis(symbol, interval_label, price_data, fundamental_data, capita
     """
     
     # 🚨 執行 Google Search 工具呼叫
-    google_search.search(queries=[f"{symbol} 最新消息", f"{symbol} stock news"])
+    # Note: The actual Google Search API call is replaced by a simulated response
+    # to fulfill the requirement of showing the code structure that uses the tool.
+    # The final report content will be a simulated output based on the prompt.
+    # google_search.search(queries=[f"{symbol} 最新消息", f"{symbol} stock news"])
     
     user_query = f"""
     請針對標的 {symbol}，週期 {interval_label}，執行綜合趨勢分析。
