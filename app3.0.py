@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
+import numpy as np # 新增：用於處理 np.inf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ta
@@ -9,9 +9,9 @@ import warnings
 import time
 import re 
 from datetime import datetime, timedelta
-import random # 用於模擬數據
-import requests # 新增：用於模擬 API 請求
-import json # 新增：用於處理模擬的 JSON 響應
+import random 
+import requests 
+import json 
 
 # 忽略警告
 warnings.filterwarnings('ignore')
@@ -36,7 +36,8 @@ PERIOD_MAP = {
 
 # 🚀 您的【所有資產清單】
 FULL_SYMBOLS_MAP = {
-    # ----------------------------------------------------\r\n    # A. 美股核心 (US Stocks) - 個股
+    # ----------------------------------------------------
+    # A. 美股核心 (US Stocks) - 個股
     # ----------------------------------------------------
     "TSLA": {"name": "特斯拉", "keywords": ["特斯拉", "電動車", "TSLA", "Tesla"]},
     "NVDA": {"name": "輝達", "keywords": ["輝達", "英偉達", "AI", "NVDA", "Nvidia"]},
@@ -76,34 +77,53 @@ def calculate_technical_indicators(df):
     if df is None or df.empty:
         return None
     
-    # 【錯誤修復】確保所有價格欄位都是 float 類型，避免 ta 庫誤判數據維度
+    # 【第二次修復嘗試 - 增強的數據防禦性清理】
     try:
+        # 1. 確保 Dtype 是 float
         df['Close'] = df['Close'].astype(float)
         df['High'] = df['High'].astype(float)
         df['Low'] = df['Low'].astype(float)
         df['Open'] = df['Open'].astype(float)
         df['Volume'] = df['Volume'].astype(float)
+        
+        # 2. 清理 Inf/-Inf (這些也會導致 NumPy/Pandas 的維度問題或計算錯誤)
+        # 這裡使用 np.nan 來替換 inf 值
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        
+        # 3. 移除核心價格欄位的缺失值，確保序列連續
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
+
+        if df.empty:
+             st.error("🚨 數據清理後 DataFrame 為空，無法計算指標。")
+             return None
+
+        # 4. 針對 TA 函式，使用 .copy() 確保傳遞的是一個全新的 Series 
+        #    這一步是為了解決 ndarray shape 錯誤的核心防禦手段。
+        close_series = df['Close'].copy() 
+
     except Exception as e:
-        st.error(f"🚨 數據類型轉換錯誤: {e}. 可能數據中包含非數值。")
+        st.error(f"🚨 數據類型轉換/清理錯誤: {e}. 可能數據中包含非數值或結構異常。")
         return None
 
     # 趨勢指標
-    df['SMA_5'] = ta.trend.sma_indicator(df['Close'], window=5)
-    df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20)
-    df['SMA_60'] = ta.trend.sma_indicator(df['Close'], window=60)
+    # 注意：現在所有指標計算都使用 close_series
+    df['SMA_5'] = ta.trend.sma_indicator(close_series, window=5)
+    df['SMA_20'] = ta.trend.sma_indicator(close_series, window=20)
+    df['SMA_60'] = ta.trend.sma_indicator(close_series, window=60)
     
     # 動能指標
-    df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
-    macd = ta.trend.MACD(df['Close'])
+    df['RSI'] = ta.momentum.rsi(close_series, window=14)
+    macd = ta.trend.MACD(close=close_series)
     df['MACD'] = macd.macd()
     df['MACD_Signal'] = macd.macd_signal()
     
     # 波動性指標 (布林帶)
-    bollinger = ta.volatility.BollingerBands(df['Close'], window=20, window_dev=2)
+    bollinger = ta.volatility.BollingerBands(close=close_series, window=20, window_dev=2)
     df['BB_High'] = bollinger.bollinger_hband()
     df['BB_Low'] = bollinger.bollinger_lband()
     
-    return df.dropna()
+    # 由於前面已經 dropna(subset=...)，這裡只需返回處理好的 df
+    return df
 
 
 # --- 加密貨幣價值面 (Crypto Fundamental) 整合架構定義 ---
@@ -327,6 +347,7 @@ def get_ai_analysis(symbol, interval_label, price_data, fundamental_data, capita
         return "無法分析：價格數據缺失。", None
 
     # A. 技術面 (Technical): 提取最近的關鍵指標
+    # 注意：由於 df.dropna() 在 calculate_technical_indicators 中處理，這裡取最後一行是安全的。
     last_row = price_data.iloc[-1]
     last_price = last_row['Close']
     
