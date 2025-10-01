@@ -75,10 +75,9 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
                 progress_bar.empty()
                 return None
             
-            # --- 數據清洗與標準化 (修正 'tuple' object has no attribute 'capitalize' 錯誤) ---
+            # --- 數據清洗與標準化 ---
             
             # 1. 確保欄位名稱為簡單的字串，並進行統一標準化處理。
-            # 這是修正 tuple 錯誤的關鍵步驟。
             new_cols = {}
             for col in data.columns:
                 # 處理可能的 MultiIndex (col 可能是 tuple) 或簡單字串
@@ -87,7 +86,7 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
                 # 統一命名格式 (例如: Adj Close -> Adj_Close, Open -> Open)
                 standard_name = col_name.replace('Adj Close', 'Adj_Close').replace(' ', '_').capitalize()
                 
-                # 處理重覆的欄位名稱 (例如：MultiIndex 扁平化後可能重覆)
+                # 處理重覆的欄位名稱
                 if standard_name in new_cols.values():
                      standard_name = standard_name + "_Dupe"
                 
@@ -95,6 +94,23 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
                 
             data = data.rename(columns=new_cols)
 
+            # --- 額外防禦性檢查和類型轉換 (修正 ValueError: Data must be 1-dimensional) ---
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for col in required_cols:
+                if col in data.columns:
+                    # 1. 如果欄位仍是 MultiIndex 或 2D DataFrame (罕見但可能發生)，嘗試扁平化
+                    # 這一步確保即使內部結構不標準，也能提取出 1D 數據
+                    if isinstance(data[col], pd.DataFrame):
+                        data[col] = data[col].iloc[:, 0]
+                    
+                    # 2. 確保數據類型為 float，並強制轉換為 Series
+                    # 這一步是解決 'ValueError: Data must be 1-dimensional' 的關鍵
+                    try:
+                        data[col] = pd.to_numeric(data[col], errors='coerce').astype(float)
+                    except Exception as type_e:
+                        st.warning(f"⚠️ 欄位 '{col}' 轉換為 float 失敗: {type_e}")
+            # --- 結束額外防禦性檢查 ---
+            
             # 2. 處理缺失值 (使用前一個有效值填充，然後移除剩餘的 NaN)
             data.fillna(method='ffill', inplace=True)
             data.dropna(inplace=True) 
@@ -102,8 +118,7 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
             # 3. 處理 Volume 為零的異常數據 (可能為數據錯誤或停牌日)
             data = data[data['Volume'] > 0]
             
-            # 4. 確保關鍵欄位存在
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            # 4. 確保關鍵欄位存在 (再次檢查，因為我們可能在轉換中丟失)
             if not all(col in data.columns for col in required_cols):
                 st.error(f"⚠️ **數據格式錯誤:** 獲取的數據缺少關鍵欄位 ({required_cols})。")
                 progress_bar.empty()
@@ -148,6 +163,7 @@ def calculate_technical_indicators(data):
     df['SMA_200'] = df['Close'].rolling(window=200).mean() # 增加長期趨勢判斷
     
     # 動量指標: RSI
+    # 這裡 df['Close'] 現在保證是 1D Series，解決了 ValueError
     df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
     
     # 動量指標: MACD
@@ -168,9 +184,8 @@ def calculate_technical_indicators(data):
     # 關鍵：確保數據能進行所有計算
     required_data_points = max(200, 50, 20) + 1 # 取最大窗口 + 1
     if len(df) < required_data_points:
-         # 由於我們在 get_data 中已經檢查了至少 20 筆，這裡只需檢查 200 筆的完整性
+         # 對於日線以上的週期，若數據不足 200，則不使用 SMA 200
          if len(df) < 200:
-             # 對於日線以上的週期，若數據不足 200，則不使用 SMA 200
              df.drop(columns=['SMA_200'], errors='ignore', inplace=True) 
 
     return df.dropna()
@@ -394,13 +409,13 @@ def sidebar_ui():
     current_input = st.session_state['sidebar_search_input'].upper().strip()
     
     def get_default_asset_index(input_symbol):
-        if input_symbol in US_STOCKS_MAP or (not input_symbol.endswith(".TW") and not input_symbol.endswith("-USD")):
+        if input_symbol in US_STOCKS_MAP or (not input_symbol.endswith(".TW") and not input_symbol.endswith("-USD") and input_symbol in FULL_SYMBOLS_MAP):
             return 0  # 美股/其他
-        elif input_symbol.endswith(".TW"):
+        elif input_symbol.endswith(".TW") or (input_symbol not in FULL_SYMBOLS_MAP and 'TW' in input_symbol):
             return 1  # 台股
         elif input_symbol.endswith("-USD"):
             return 2  # 加密貨幣
-        return 1 # 默認台股
+        return 1 # 默認台股 (如果找不到，給台灣用戶較多可能使用台股)
 
     default_asset_index = get_default_asset_index(current_input)
     
