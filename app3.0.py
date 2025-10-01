@@ -75,18 +75,41 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
                 progress_bar.empty()
                 return None
             
-            # --- 數據清洗與標準化 (關鍵修正點 1) ---
-            data.columns = [c.capitalize() for c in data.columns]
-            data = data.rename(columns={'Adj close': 'Adj_Close'})
+            # --- 數據清洗與標準化 (修正 'tuple' object has no attribute 'capitalize' 錯誤) ---
             
-            # 1. 處理缺失值 (使用前一個有效值填充，然後移除剩餘的 NaN)
+            # 1. 確保欄位名稱為簡單的字串，並進行統一標準化處理。
+            # 這是修正 tuple 錯誤的關鍵步驟。
+            new_cols = {}
+            for col in data.columns:
+                # 處理可能的 MultiIndex (col 可能是 tuple) 或簡單字串
+                col_name = str(col[-1] if isinstance(col, tuple) else col)
+                
+                # 統一命名格式 (例如: Adj Close -> Adj_Close, Open -> Open)
+                standard_name = col_name.replace('Adj Close', 'Adj_Close').replace(' ', '_').capitalize()
+                
+                # 處理重覆的欄位名稱 (例如：MultiIndex 扁平化後可能重覆)
+                if standard_name in new_cols.values():
+                     standard_name = standard_name + "_Dupe"
+                
+                new_cols[col] = standard_name
+                
+            data = data.rename(columns=new_cols)
+
+            # 2. 處理缺失值 (使用前一個有效值填充，然後移除剩餘的 NaN)
             data.fillna(method='ffill', inplace=True)
             data.dropna(inplace=True) 
             
-            # 2. 處理 Volume 為零的異常數據 (可能為數據錯誤或停牌日)
+            # 3. 處理 Volume 為零的異常數據 (可能為數據錯誤或停牌日)
             data = data[data['Volume'] > 0]
             
-            # 3. 確保數據量足夠
+            # 4. 確保關鍵欄位存在
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in data.columns for col in required_cols):
+                st.error(f"⚠️ **數據格式錯誤:** 獲取的數據缺少關鍵欄位 ({required_cols})。")
+                progress_bar.empty()
+                return None
+            
+            # 5. 確保數據量足夠
             if len(data) < 20: # 至少需要20天計算短期均線
                 st.error(f"⚠️ **數據量過少:** {symbol} 在所選週期 ({period_key}) 僅有 {len(data)} 筆數據，無法進行有效分析。請選擇更長的週期。")
                 progress_bar.empty()
@@ -371,7 +394,7 @@ def sidebar_ui():
     current_input = st.session_state['sidebar_search_input'].upper().strip()
     
     def get_default_asset_index(input_symbol):
-        if input_symbol in US_STOCKS_MAP or not (input_symbol.endswith(".TW") or input_symbol.endswith("-USD")):
+        if input_symbol in US_STOCKS_MAP or (not input_symbol.endswith(".TW") and not input_symbol.endswith("-USD")):
             return 0  # 美股/其他
         elif input_symbol.endswith(".TW"):
             return 1  # 台股
@@ -445,9 +468,6 @@ def sidebar_ui():
 
 def main():
     """主應用程式邏輯"""
-    
-    # 修正：將 Session State 初始化移到 main 函數外部，確保首次運行時即存在
-    # 這是 Streamlit 最佳實踐，避免在函數調用時的競爭條件
     
     symbol, period_key = sidebar_ui()
     
