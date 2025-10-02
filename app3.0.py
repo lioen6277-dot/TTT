@@ -531,6 +531,3 @@ if __name__ == '__main__':
         st.session_state['current_asset_class'] = "台股" 
     
     main()
-```eof
-
-這次應該能解決所有因數據結構不穩定而引起的錯誤（包括 `tuple` 錯誤和 `1-dimensional` 錯誤），並且排除了程式碼中誤入的中文標點符號。請再次嘗試執行！
