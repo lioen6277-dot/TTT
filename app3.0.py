@@ -61,13 +61,35 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
     """
     從 yfinance 獲取歷史股價資料，包含指數退避重試機制及數據清洗。
     """
+    
     period, interval = PERIOD_MAP.get(period_key, ("5y", "1d"))
     
+    # === 關鍵修正：針對台股，限制日內週期以提高穩定性 (yfinance 限制) ===
+    is_tw_stock = symbol.upper().endswith(".TW")
+    is_intraday = interval in ["30m", "60m"]
+    
+    if is_tw_stock and is_intraday:
+        st.warning(f"⚠️ **週期限制警示**: 台股 ({symbol}) 的日內數據在 yfinance 上可能不穩定或缺失。已自動切換為 **1 日** 週期獲取數據以確保分析品質。")
+        period = "5y"
+        interval = "1d"
+        period_key = "1 日" # 更新為修正後的週期名稱
+    # =========================================================================
+    
+    # 定義程式碼期望的欄位名稱及其在標準化後的名稱
+    REQUIRED_COL_MAP = {
+        'OPEN': 'Open',
+        'HIGH': 'High',
+        'LOW': 'Low',
+        'CLOSE': 'Close',
+        'VOLUME': 'Volume'
+    }
+
     for attempt in range(max_retries):
         progress_bar.progress(20 + (attempt * 10), text=f"📥 正在獲取 {symbol} ({period_key}) 歷史數據... (嘗試 {attempt + 1}/{max_retries})")
         time.sleep(0.3)
         
         try:
+            # 使用 yf.download 獲取數據
             data = yf.download(symbol, period=period, interval=interval, progress=False, timeout=15)
             
             if data.empty:
@@ -75,51 +97,61 @@ def get_data(symbol, period_key, progress_bar, max_retries=3):
                 progress_bar.empty()
                 return None
             
-            # --- 數據清洗與標準化 (最終修正，確保 1D 數據結構) ---
+            # --- START: 數據清洗與標準化 (終極修正，確保欄位穩定) ---
             
-            # 1. 處理 MultiIndex 結構 (日內數據常見問題，扁平化欄位)
+            # 1. 處理 MultiIndex 結構 (扁平化欄位)
             if isinstance(data.columns, pd.MultiIndex):
-                # 提取最內層的欄位名稱 (例如從 (Ticker, OHLCV) 中提取 OHLCV)
                 data.columns = [col[-1] if isinstance(col, tuple) else col for col in data.columns]
                 
-            # 2. 統一欄位命名格式
-            data.columns = [c.replace('Adj Close', 'Adj_Close').replace(' ', '_').capitalize() for c in data.columns]
+            # 2. 標準化所有欄位名稱為大寫 (處理大小寫不一致的問題)
+            data.columns = [c.upper().replace('ADJ CLOSE', 'ADJ_CLOSE') for c in data.columns]
             
-            # 3. 確保關鍵欄位存在並為 1D Series (修正所有維度錯誤)
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            # 3. 檢查所有關鍵欄位是否都存在於標準化後的欄位中
+            missing_cols = [std_name for upper_name, std_name in REQUIRED_COL_MAP.items() if upper_name not in data.columns]
+            
+            if missing_cols:
+                # 如果缺少關鍵欄位，直接拋出 KeyError 觸發重試
+                raise KeyError(f"數據缺少關鍵欄位: {', '.join(missing_cols)}")
 
-            for col in required_cols:
-                if col in data.columns:
-                    # 關鍵修正：將數據轉換為底層 NumPy 陣列並強制扁平化 (`.values.flatten()`)
-                    # 然後重新構建為一個乾淨的 1D pandas Series，dtype 設為 float。
-                    # 這樣就徹底解決了 'Data must be 1-dimensional' 的 ValueError。
-                    data[col] = pd.Series(
-                        data[col].values.flatten(), 
-                        index=data.index, 
-                        dtype=float 
-                    )
-                else:
-                    st.warning(f"⚠️ 數據缺少關鍵欄位: {col}")
+            # 4. 重新命名欄位為程式碼期望的格式 (Open, High, Low, Close, Volume)
+            data.rename(columns=REQUIRED_COL_MAP, inplace=True)
+            
+            # 5. 確保關鍵數值欄位為 1D Series，並轉換為 float (修正維度錯誤)
+            for col in REQUIRED_COL_MAP.values():
+                 # 關鍵修正：將數據轉換為底層 NumPy 陣列並強制扁平化
+                 data[col] = pd.Series(
+                    data[col].values.flatten(), 
+                    index=data.index, 
+                    dtype=float 
+                 )
 
+            # --- END: 數據清洗與標準化 ---
 
-            # 4. 處理缺失值 (使用前一個有效值填充，然後移除剩餘的 NaN)
+            # 6. 處理缺失值
             data.fillna(method='ffill', inplace=True)
             data.dropna(inplace=True) 
             
-            # 5. 處理 Volume 為零的異常數據 (可能為數據錯誤或停牌日)
+            # 7. 處理 Volume 為零的異常數據
             data = data[data['Volume'] > 0]
             
-            # 6. 確保數據量足夠
-            if len(data) < 20: # 至少需要20天計算短期均線
+            # 8. 確保數據量足夠
+            if len(data) < 20: 
                 st.error(f"⚠️ **數據量過少:** {symbol} 在所選週期 ({period_key}) 僅有 {len(data)} 筆數據，無法進行有效分析。請選擇更長的週期。")
                 progress_bar.empty()
                 return None
             
             data['Symbol'] = symbol
+            data['Period_Key'] = period_key # 儲存修正後的週期資訊
+            
             progress_bar.progress(80, text=f"✅ 數據清洗與獲取成功！")
             time.sleep(0.3)
             return data
 
+        except KeyError as e:
+            # 捕捉因欄位缺失而主動拋出的錯誤，嘗試重試
+            st.warning(f"⚠️ 數據欄位錯誤: {e}，正在重試...")
+            time.sleep(1) 
+            
         except Exception as e:
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt  # 1, 2, 4 seconds
@@ -148,7 +180,6 @@ def calculate_technical_indicators(data):
     df['SMA_200'] = df['Close'].rolling(window=200).mean() # 增加長期趨勢判斷
     
     # 動量指標: RSI
-    # 由於數據已在 get_data 中被強制轉換為 1D Series，這裡將順利運行
     df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
     
     # 動量指標: MACD
@@ -178,11 +209,14 @@ def calculate_technical_indicators(data):
 def perform_ai_analysis(symbol, data, period_key):
     """
     模擬 AI 頂級專家 (專業操盤手/量化分析師) 的四維度分析輸出。
-    
-    融入了價格趨勢、動量、成交量(籌碼)、波動性等綜合標準。
     """
-    
-    st.subheader(f"目標標的：{symbol} ({period_key} 週期)")
+    # 從數據中獲取最新的週期資訊（如果被 get_data 強制切換）
+    if 'Period_Key' in data.columns:
+        display_period_key = data['Period_Key'].iloc[-1]
+    else:
+        display_period_key = period_key
+        
+    st.subheader(f"目標標的：{symbol} ({display_period_key} 週期)")
     last_date = data.index[-1].strftime('%Y-%m-%d')
     last_close = data['Close'].iloc[-1]
     st.markdown(f"#### 最新收盤日: {last_date} | 最新收盤價: **${last_close:.2f}**")
@@ -443,7 +477,6 @@ def sidebar_ui():
     )
 
     # 4. 手動輸入代碼 (狀態同步的關鍵)
-    # 這裡直接使用 'sidebar_search_input' 作為 key，讓其值與 Session State 保持雙向綁定。
     st.sidebar.text_input(
         "或手動輸入代碼 (例如: GOOG, 2330.TW, BTC-USD)：",
         key="sidebar_search_input" # 保持與快速選擇的回調函式使用的 Session State 鍵一致
@@ -491,11 +524,13 @@ def main():
             # 計算指標
             analyzed_data = calculate_technical_indicators(data)
             
+            # 使用從 data 中獲取到的 period_key，因為它可能被修正了
+            current_period_key = data['Period_Key'].iloc[-1]
+            
             if analyzed_data is not None and len(analyzed_data) > 0:
                 # 執行專業分析
-                perform_ai_analysis(st.session_state['last_search_symbol'], analyzed_data, period_key)
+                perform_ai_analysis(st.session_state['last_search_symbol'], analyzed_data, current_period_key)
             else:
-                 # 這裡的錯誤處理已在 get_data 和 calculate_technical_indicators 中優化
                  st.error(f"⚠️ **分析資料不足或處理失敗**：請檢查所選週期是否包含足夠的歷史數據。")
 
             # 重設 data_ready 狀態以允許下次執行
@@ -531,3 +566,6 @@ if __name__ == '__main__':
         st.session_state['current_asset_class'] = "台股" 
     
     main()
+```eof
+
+這次的修正已經將數據穩定性提升至最高，特別是針對 **台股的數據獲取問題** 進行了優化。請您再次運行應用程式，應該能看到 `2454.TW` 的分析圖表。
