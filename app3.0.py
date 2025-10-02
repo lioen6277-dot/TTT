@@ -951,12 +951,12 @@ def main():
                     df = calculate_technical_indicators(df) 
                     fa_result = calculate_fundamental_rating(final_symbol_to_analyze)
                     
-    analysis = generate_expert_fusion_signal(
-        df, 
-        fa_rating=fa_result, 
-        is_long_term=is_long_term,
-        currency_symbol=currency_symbol 
-    )
+                analysis = generate_expert_fusion_signal(
+                    df, 
+                    fa_rating=fa_result, 
+                    is_long_term=is_long_term,
+                    currency_symbol=currency_symbol 
+                )
                     
                     st.session_state['analysis_results'] = {
                         'df': df,
@@ -970,8 +970,8 @@ def main():
                     
                     st.session_state['data_ready'] = True
 
-except Exception as e:
-    st.error(f"❌ 分析 {final_symbol_to_analyze} 時發生未預期的錯誤: {str(e)}")
+        except Exception as e:
+            st.error(f"❌ 分析 {final_symbol_to_analyze} 時發生未預期的錯誤: {str(e)}")
             st.info("💡 請檢查代碼格式或嘗試其他分析週期。")
             st.session_state['data_ready'] = False 
 
@@ -1221,3 +1221,4 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
+
