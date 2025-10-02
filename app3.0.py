@@ -15,8 +15,7 @@ warnings.filterwarnings('ignore')
 
 
 st.set_page_config(
-    page_title="AI趨勢分析", 
-    page_icon="📈", 
+    page_title="🚀AI趨勢分析📈", 
     page_icon="🚀", 
     layout="wide"
 )
