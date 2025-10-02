@@ -12,10 +12,7 @@ from datetime import datetime, timedelta
 
 warnings.filterwarnings('ignore')
 
-# ==============================================================================
 # 1. 頁面配置與全局設定
-# ==============================================================================
-
 st.set_page_config(
     page_title="AI趨勢分析", 
     page_icon="📈", 
@@ -32,9 +29,7 @@ PERIOD_MAP = {
 
 # 🚀 您的【所有資產清單】
 FULL_SYMBOLS_MAP = {
-    # ----------------------------------------------------
     # A. 美股核心 (US Stocks) - 個股
-    # ----------------------------------------------------
     "TSLA": {"name": "特斯拉", "keywords": ["特斯拉", "電動車", "TSLA", "Tesla"]},
     "NVDA": {"name": "輝達", "keywords": ["輝達", "英偉達", "AI", "NVDA", "Nvidia"]},
     "AAPL": {"name": "蘋果", "keywords": ["蘋果", "Apple", "AAPL"]},
@@ -68,9 +63,7 @@ FULL_SYMBOLS_MAP = {
     "SPY": {"name": "SPDR 標普500 ETF", "keywords": ["SPY", "標普ETF"]},
     "QQQ": {"name": "Invesco QQQ Trust", "keywords": ["QQQ", "納斯達克ETF"]},
     "VOO": {"name": "Vanguard 標普500 ETF", "keywords": ["VOO", "Vanguard"]},
-    # ----------------------------------------------------
     # C. 台灣市場 (TW Stocks/ETFs/Indices)
-    # ----------------------------------------------------
     "2330.TW": {"name": "台積電", "keywords": ["台積電", "2330", "TSMC"]},
     "2317.TW": {"name": "鴻海", "keywords": ["鴻海", "2317", "Foxconn"]},
     "2454.TW": {"name": "聯發科", "keywords": ["聯發科", "2454", "MediaTek"]},
@@ -92,9 +85,7 @@ FULL_SYMBOLS_MAP = {
     "0056.TW": {"name": "元大高股息", "keywords": ["高股息", "0056"]},
     "00878.TW": {"name": "國泰永續高股息", "keywords": ["00878", "國泰永續"]},
     "^TWII": {"name": "台股指數", "keywords": ["台股指數", "加權指數", "^TWII"]},
-    # ----------------------------------------------------
     # D. 加密貨幣 (Crypto)
-    # ----------------------------------------------------
     "BTC-USD": {"name": "比特幣", "keywords": ["比特幣", "BTC", "bitcoin", "BTC-USDT"]},
     "ETH-USD": {"name": "以太坊", "keywords": ["以太坊", "ETH", "ethereum", "ETH-USDT"]},
     "SOL-USD": {"name": "Solana", "keywords": ["Solana", "SOL", "SOL-USDT"]},
@@ -125,9 +116,7 @@ for category, codes in CATEGORY_MAP.items():
             options[f"{code} - {info['name']}"] = code
     CATEGORY_HOT_OPTIONS[category] = options
     
-# ==============================================================================
 # 2. 輔助函式定義
-# ==============================================================================
 
 def get_symbol_from_query(query: str) -> str:
     """ 🎯 進化後的代碼解析函數：同時檢查 FULL_SYMBOLS_MAP """
@@ -225,10 +214,10 @@ def calculate_technical_indicators(df):
     # ADX (進階設定: 週期 9) - 趨勢強度的濾鏡
     df['ADX'] = ta.trend.adx(df['High'], df['Low'], df['Close'], window=9)
     
-    # 增加 SMA 20 (用於回測基準)
+    # SMA 20 (用於回測基準)
     df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20) 
 
-    # --- 【新增：成交量與籌碼分析】 ---
+    # 成交量與籌碼分析
     # OBV (On-Balance Volume)
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
@@ -242,8 +231,7 @@ def calculate_technical_indicators(df):
     
     return df
 
-# get_technical_data_df (維持不變 - 技術指標表格與判讀)
-def get_technical_data_df(df):
+# get_technical_data_dfdef get_technical_data_df(df):
     """獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。"""
     
     if df.empty or len(df) < 200: return pd.DataFrame()
@@ -450,19 +438,19 @@ def calculate_fundamental_rating(symbol):
         totalCash = info.get('totalCash', 0)
         totalDebt = info.get('totalDebt', 0) 
         
-        # 1. 成長與效率評分 (ROE) (總分 3)
+        # 成長與效率評分 (ROE) (總分 3)
         roe_score = 0
         if roe > 0.15: roe_score = 3 # ROE > 15% (頂級標準)
         elif roe > 0.10: roe_score = 2
         elif roe > 0: roe_score = 1
         
-        # 2. 估值評分 (PE) (總分 3)
+        # 估值評分 (PE) (總分 3)
         pe_score = 0
         if trailingPE < 15 and trailingPE > 0: pe_score = 3 # P/E < 15 (格雷厄姆標準)
         elif trailingPE < 25 and trailingPE > 0: pe_score = 2 # P/E < 25 (考慮成長股/行業平均)
         elif trailingPE < 35 and trailingPE > 0: pe_score = 1
         
-        # 3. 現金流與償債能力 (總分 3)
+        # 現金流與償債能力 (總分 3)
         cf_score = 0
         cash_debt_ratio = (totalCash / totalDebt) if totalDebt and totalDebt != 0 else 100 
         
@@ -503,21 +491,21 @@ def calculate_volume_rating(df):
     volume_score = 0
     signal_list = []
 
-    # 1. 判斷成交量是否放量 (Volume > Volume_MA_20)
+    # 判斷成交量是否放量 (Volume > Volume_MA_20)
     if last_row['Volume'] > last_row['Volume_MA_20'] and last_row['Volume'] > df['Volume'].median():
         volume_score += 1.0
         signal_list.append("✅ 成交量放量 (高於 MA_20)")
     else:
         signal_list.append("➖ 成交量一般或縮量")
 
-    # 2. 判斷 OBV 趨勢 (OBV_Slope > 0)
+    # 判斷 OBV 趨勢 (OBV_Slope > 0)
     if last_row['OBV_Slope'] > 0:
         volume_score += 1.0
         signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流入)")
     elif last_row['OBV_Slope'] < 0:
         signal_list.append("❌ OBV 累積量下降 (籌碼流出風險)")
         
-    # 3. OBV 與價格的背離/同向判斷 (最關鍵的 1 分)
+    # OBV 與價格的背離/同向判斷 (最關鍵的 1 分)
     # 假設收盤價是上漲的，OBV 也上漲，為同向健康
     price_change = last_row['Close'] - df.iloc[-2]['Close']
     
@@ -559,7 +547,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     
     expert_opinions = {}
     
-    # 1. 均線交叉與排列專家 (MA Cross & Alignment)
+    # 均線交叉與排列AI (MA Cross & Alignment)
     ma_score = 0
     ema_10 = last_row['EMA_10']
     ema_50 = last_row['EMA_50']
@@ -587,7 +575,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         ma_score = -1.0
         expert_opinions['趨勢分析 (MA 排列)'] = "空頭：EMA 10 位於 EMA 50 之下。"
 
-    # 2. 籌碼專家評分 (Volume Expert - OBV Slope)
+    # 籌碼AI評分 (Volume Expert - OBV Slope)
     volume_score = 0
     # 這裡假設 'OBV_Slope' 已經在 df 中計算完成
     try:
@@ -599,15 +587,15 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     # 判斷 OBV Slope (斜率)
     if obv_slope > 0:
         volume_score = 2.0  
-        expert_opinions['籌碼專家 (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
+        expert_opinions['籌碼AI (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
     elif obv_slope < 0:
         volume_score = -2.0 
-        expert_opinions['籌碼專家 (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
+        expert_opinions['籌碼AI (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
     else:
         volume_score = 0.5  
-        expert_opinions['籌碼專家 (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
+        expert_opinions['籌碼AI (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
 
-    # 3. 動能專家 (RSI 9) 
+    # 動能AI (RSI 9) 
     momentum_score = 0
     rsi = last_row['RSI']
     
@@ -624,7 +612,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         momentum_score = -1.0 
         expert_opinions['動能分析 (RSI 9)'] = "空頭：RSI < 50 中軸，維持在弱勢區域。"
 
-    # 4. 趨勢強度專家 (MACD 8/17/9 & ADX 9) 
+    # 趨勢強度AI (MACD 8/17/9 & ADX 9) 
     strength_score = 0
     macd_diff = last_row['MACD_Hist']
     prev_macd_diff = prev_row['MACD_Hist']
@@ -647,7 +635,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     else:
         expert_opinions['趨勢強度 (ADX 9)'] = f"盤整：ADX {adx_value:.2f} < 25，信號有效性降低。"
 
-    # 5. K線形態專家 (基於 Heikin-Ashi K線 - 專業操盤手濾波)
+    # K線形態AI (基於 Heikin-Ashi K線 - 專業操盤手濾波)
     kline_score = 0
     # Heikin-Ashi 判斷：Close >= Open 為陽線 (趨勢延續)
     is_ha_up_bar = last_row['Close'] >= last_row['Open'] 
@@ -671,7 +659,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         kline_score = -0.5
         expert_opinions['K線形態分析'] = "HA 陰線：趨勢偏空，但有影線（波動或修正）。"
 
-    # 6. 融合評分 (納入 FA Score & Volume Score)
+    # 融合評分 (納入 FA Score & Volume Score)
     # FA 分數正規化：將 9 分基本面分數轉換為 -3 到 +3 的評級權重
     fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
     
@@ -737,13 +725,13 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
         
     
-    # 7. 最終交易信號與報告 (總結專家意見)
+    # 最終交易信號與報告 (總結AI意見)
     
     # --- 報告列表組裝 ---
     fa_message = fa_rating.get('Message', '基本面數據缺失或不適用。')
-    volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
+    volume_opinion = expert_opinions.get('籌碼AI (OBV)', '籌碼面數據缺失。')
     
-    # 從專家意見中提取簡潔的描述
+    # 從AI意見中提取簡潔的描述
     volume_summary = volume_opinion.split('：')[-1].strip()
 
     total_signal_list = [
@@ -781,14 +769,13 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         'current_price': round(current_price, 4),
         'expert_opinions': expert_opinions,
         'atr': round(atr_value, 4),
-        'risk_multiple_used': atr_multiplier # 新增回傳實際使用的 ATR 乘數
+        'risk_multiple_used': atr_multiplier 
     }
 
 def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna().copy()
     if df_clean.empty: return go.Figure().update_layout(title="數據不足，無法繪製圖表")
 
-    # 🚀 變更：將子圖數量從 3 個調整為 4 個，為 OBV 騰出空間
     fig = make_subplots(rows=4, cols=1, 
                         shared_xaxes=True, 
                         vertical_spacing=0.05, # 減少間距
@@ -798,13 +785,13 @@ def create_comprehensive_chart(df, symbol, period_key):
                                         "RSI/ADX 強弱與趨勢指標", 
                                         "OBV 籌碼/量能趨勢")) # 增加 OBV 標題
 
-    # 1. 主圖：K線與均線 (EMA 10, 50, 200)
+    # 主圖：K線與均線 (EMA 10, 50, 200)
     fig.add_trace(go.Candlestick(x=df_clean.index, open=df_clean['Open'], high=df_clean['High'], low=df_clean['Low'], close=df_clean['Close'], name='K線', increasing_line_color='#cc0000', decreasing_line_color='#1e8449'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_10'], line=dict(color='#ffab40', width=1), name='EMA 10'), row=1, col=1) 
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_50'], line=dict(color='#0077b6', width=1.5), name='EMA 50'), row=1, col=1) 
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_200'], line=dict(color='#800080', width=1.5, dash='dash'), name='EMA 200'), row=1, col=1) 
 
-    # 2. MACD 動能指標
+    # MACD 動能指標
     # MACD Bar
     macd_colors = ['#cc0000' if val >= 0 else '#1e8449' for val in df_clean['MACD_Hist']]
     fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['MACD_Hist'], name='MACD 柱', marker_color=macd_colors), row=2, col=1)
@@ -815,14 +802,14 @@ def create_comprehensive_chart(df, symbol, period_key):
     fig.update_yaxes(title_text="MACD", row=2, col=1, fixedrange=True)
 
 
-    # 3. RSI/ADX 強弱與趨勢指標
+    # RSI/ADX 強弱與趨勢指標
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['RSI'], line=dict(color='#0077b6', width=1.5), name='RSI'), row=3, col=1)
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['ADX'], line=dict(color='#800080', width=1.5, dash='dot'), name='ADX'), row=3, col=1) # 新增 ADX
     fig.update_yaxes(range=[0, 100], row=3, col=1, fixedrange=True)
     fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1, opacity=0.5)
     fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1, opacity=0.5)
 
-    # 4. 籌碼/量能指標 (OBV)
+    # 籌碼/量能指標 (OBV)
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['OBV'], line=dict(color='#1e8449', width=1.5), name='OBV'), row=4, col=1)
     fig.update_yaxes(title_text="OBV", row=4, col=1, fixedrange=True)
 
@@ -849,15 +836,13 @@ def update_search_input():
             st.session_state.analyze_trigger = True
 
 
-# ==============================================================================
 # 3. Streamlit 主邏輯 (Main Function)
-# ==============================================================================
 
 def main():
     
     st.markdown("""
         <style>
-        /* 1. 側邊欄的主要分析按鈕 - 核心玻璃化設置 (鮭魚色：#FA8072) */
+        /* 側邊欄的主要分析按鈕 - 核心玻璃化設置 (鮭魚色：#FA8072) */
         [data-testid="stSidebar"] .stButton button {
             color: #FA8072 !important; /* 淡橙色文字 */
             background-color: rgba(255, 255, 255, 0.1) !important; /* 透明背景 */
@@ -867,14 +852,14 @@ def main():
             border-radius: 8px;
             transition: all 0.3s ease;
         }
-        /* 2. 懸停 (Hover) 效果 */
+        /* 懸停 (Hover) 效果 */
         [data-testid="stSidebar"] .stButton button:hover {
             color: #E9967A !important; 
             background-color: rgba(250, 128, 114, 0.15)  !important; 
             border-color: #E9967A !important;
             box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15); 
         }
-        /* 3. 點擊 (Active/Focus) 效果 */
+        /* 點擊 (Active/Focus) 效果 */
         [data-testid="stSidebar"] .stButton button:active,
         [data-testid="stSidebar"] .stButton button:focus {
             color: #FA8072 !important;
@@ -882,12 +867,12 @@ def main():
             border-color: #E9967A !important;
             box-shadow: none !important; 
         }
-        /* 4. 修正主標題顏色 */
+        /* 修正主標題顏色 */
         h1 { color: #cc6600; } 
         </style>
         """, unsafe_allow_html=True)
 
- # --- 0. 側邊欄選擇器 (Category Selectbox) ---
+ # --- 側邊欄選擇器 (Category Selectbox) ---
     category_keys = list(CATEGORY_MAP.keys())
     
     st.sidebar.markdown("1. 選擇資產類別")
@@ -921,7 +906,7 @@ def main():
 
     st.markdown("---")
 
-    # --- 2. 輸入股票代碼或中文名稱 (Text Input) ---
+    # --- 輸入股票代碼或中文名稱 (Text Input) ---
     st.sidebar.markdown("2. 🔍 **輸入股票代碼或中文名稱**")
 
     text_input_current_value = st.session_state.get('sidebar_search_input', st.session_state.get('last_search_symbol', "2330.TW"))
@@ -947,7 +932,7 @@ def main():
 
     st.sidebar.markdown("---")
 
-    # --- 3. 選擇週期 (Period Selectbox) ---
+    # --- 選擇週期 (Period Selectbox) ---
     st.sidebar.markdown("3. **選擇週期**")
 
     period_keys = list(PERIOD_MAP.keys())
@@ -961,7 +946,7 @@ def main():
 
     st.sidebar.markdown("---")
 
-    # --- 4. 開始分析 (Button) ---
+    # --- 開始分析 (Button) ---
     st.sidebar.markdown("4. **開始分析**")
     
     analyze_button_clicked = st.sidebar.button("📊 執行AI分析", key="main_analyze_button") 
@@ -1259,4 +1244,4 @@ if __name__ == '__main__':
     st.markdown("⚠️ **綜合風險與免責聲明 (Risk & Disclaimer)**", unsafe_allow_html=True)
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
-    st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
+    st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼AI")
