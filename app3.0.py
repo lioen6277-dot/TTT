@@ -489,55 +489,55 @@ def calculate_fundamental_rating(symbol):
             
         return { "Combined_Rating": combined_rating, "Message": message, "Details": info }
 
-        #         ==============================================================================
-        # 5. 【新增】籌碼面/成交量指標評分 (專業操盤手/量化分析師)
-        #         ==============================================================================
-        def calculate_volume_rating(df):
-            """
-            基於 OBV 和成交量 MA 判斷籌碼健康度。
-            總分 3 分，反映籌碼面的累積強度。
-            """
-            last_row = df.iloc[-1]
-            volume_score = 0
-            signal_list = []
-        
-            # 1. 判斷成交量是否放量 (Volume > Volume_MA_20)
-            if last_row['Volume'] > last_row['Volume_MA_20'] and last_row['Volume'] > df['Volume'].median():
-                volume_score += 1.0
-                signal_list.append("✅ 成交量放量 (高於 MA_20)")
-            else:
-                signal_list.append("➖ 成交量一般或縮量")
-        
-            # 2. 判斷 OBV 趨勢 (OBV_Slope > 0)
-            if last_row['OBV_Slope'] > 0:
-                volume_score += 1.0
-                signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流入)")
-            elif last_row['OBV_Slope'] < 0:
-                signal_list.append("❌ OBV 累積量下降 (籌碼流出風險)")
-                
-            # 3. OBV 與價格的背離/同向判斷 (最關鍵的 1 分)
-            # 假設收盤價是上漲的，OBV 也上漲，為同向健康
-            price_change = last_row['Close'] - df.iloc[-2]['Close']
-            
-            if price_change > 0 and last_row['OBV_Slope'] > 0:
-                volume_score += 1.0 # 價格和量同步上升
-                signal_list.append("🌟 量價同向健康 (上漲動能強)")
-            elif price_change < 0 and last_row['OBV_Slope'] > 0:
-                # 價格下跌但 OBV 上升：潛在底部吸籌，視為中性偏好
-                volume_score += 0.5
-                signal_list.append("⚠️ 價跌量增 (潛在吸籌)")
-            elif price_change > 0 and last_row['OBV_Slope'] < 0:
-                # 價格上漲但 OBV 下降：無量上漲，視為背離風險
-                volume_score -= 1.0 # 直接扣分反映重大風險
-                signal_list.append("🚨 價漲量縮背離 (量能不足風險)")
-            else:
-                signal_list.append("➖ 量價同向或中性")
-        
-        
-            return volume_score, signal_list
-
     except Exception as e:
         return { "Combined_Rating": 1.0, "Message": f"基本面數據獲取失敗或不適用 (代碼可能錯誤或數據缺失)。", "Details": None }
+
+        # 新增籌碼面/成交量指標評分 (專業操盤手/量化分析師)
+
+    def calculate_volume_rating(df):
+        """
+        基於 OBV 和成交量 MA 判斷籌碼健康度。
+        總分 3 分，反映籌碼面的累積強度。
+        """
+        last_row = df.iloc[-1]
+        volume_score = 0
+        signal_list = []
+    
+        # 1. 判斷成交量是否放量 (Volume > Volume_MA_20)
+        if last_row['Volume'] > last_row['Volume_MA_20'] and last_row['Volume'] > df['Volume'].median():
+            volume_score += 1.0
+            signal_list.append("✅ 成交量放量 (高於 MA_20)")
+        else:
+            signal_list.append("➖ 成交量一般或縮量")
+    
+        # 2. 判斷 OBV 趨勢 (OBV_Slope > 0)
+        if last_row['OBV_Slope'] > 0:
+            volume_score += 1.0
+            signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流入)")
+        elif last_row['OBV_Slope'] < 0:
+            signal_list.append("❌ OBV 累積量下降 (籌碼流出風險)")
+            
+        # 3. OBV 與價格的背離/同向判斷 (最關鍵的 1 分)
+        # 假設收盤價是上漲的，OBV 也上漲，為同向健康
+        price_change = last_row['Close'] - df.iloc[-2]['Close']
+        
+        if price_change > 0 and last_row['OBV_Slope'] > 0:
+            volume_score += 1.0 # 價格和量同步上升
+            signal_list.append("🌟 量價同向健康 (上漲動能強)")
+        elif price_change < 0 and last_row['OBV_Slope'] > 0:
+            # 價格下跌但 OBV 上升：潛在底部吸籌，視為中性偏好
+            volume_score += 0.5
+            signal_list.append("⚠️ 價跌量增 (潛在吸籌)")
+        elif price_change > 0 and last_row['OBV_Slope'] < 0:
+            # 價格上漲但 OBV 下降：無量上漲，視為背離風險
+            volume_score -= 1.0 # 直接扣分反映重大風險
+            signal_list.append("🚨 價漲量縮背離 (量能不足風險)")
+        else:
+            signal_list.append("➖ 量價同向或中性")
+    
+    
+        return volume_score, signal_list
+
 
 # generate_expert_fusion_signal (確認已納入 ATR R:R 風險管理和多指標融合)
 # ⭐️ 優化 2: 修正策略建議中的價格顯示格式，使其對低價/加密貨幣更精確
@@ -1162,4 +1162,3 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
-
