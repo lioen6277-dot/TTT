@@ -611,8 +611,8 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
 
     # 3. 趨勢強度專家 (MACD 8/17/9 & ADX 9)
     strength_score = 0
-    macd_diff = last_row['MACD']
-    prev_macd_diff = prev_row['MACD']
+    macd_diff = last_row['MACD_Hist']
+    prev_macd_diff = prev_row['MACD_Hist']
 
     # MACD 動能
     if macd_diff > 0 and macd_diff > prev_macd_diff:
@@ -1221,11 +1221,3 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
-
-
-
-
-
-
-
-
