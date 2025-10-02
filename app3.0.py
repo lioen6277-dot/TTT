@@ -494,53 +494,53 @@ def calculate_fundamental_rating(symbol):
 
         # 新增籌碼面/成交量指標評分 (專業操盤手/量化分析師)
 
-    def calculate_volume_rating(df):
-        """
-        基於 OBV 和成交量 MA 判斷籌碼健康度。
-        總分 3 分，反映籌碼面的累積強度。
-        """
-        last_row = df.iloc[-1]
-        volume_score = 0
-        signal_list = []
-    
-        # 1. 判斷成交量是否放量 (Volume > Volume_MA_20)
-        if last_row['Volume'] > last_row['Volume_MA_20'] and last_row['Volume'] > df['Volume'].median():
-            volume_score += 1.0
-            signal_list.append("✅ 成交量放量 (高於 MA_20)")
-        else:
-            signal_list.append("➖ 成交量一般或縮量")
-    
-        # 2. 判斷 OBV 趨勢 (OBV_Slope > 0)
-        if last_row['OBV_Slope'] > 0:
-            volume_score += 1.0
-            signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流入)")
-        elif last_row['OBV_Slope'] < 0:
-            signal_list.append("❌ OBV 累積量下降 (籌碼流出風險)")
-            
-        # 3. OBV 與價格的背離/同向判斷 (最關鍵的 1 分)
-        # 假設收盤價是上漲的，OBV 也上漲，為同向健康
-        price_change = last_row['Close'] - df.iloc[-2]['Close']
+def calculate_volume_rating(df):
+    """
+    基於 OBV 和成交量 MA 判斷籌碼健康度。
+    總分 3 分，反映籌碼面的累積強度。
+    """
+    last_row = df.iloc[-1]
+    volume_score = 0
+    signal_list = []
+
+    # 1. 判斷成交量是否放量 (Volume > Volume_MA_20)
+    if last_row['Volume'] > last_row['Volume_MA_20'] and last_row['Volume'] > df['Volume'].median():
+        volume_score += 1.0
+        signal_list.append("✅ 成交量放量 (高於 MA_20)")
+    else:
+        signal_list.append("➖ 成交量一般或縮量")
+
+    # 2. 判斷 OBV 趨勢 (OBV_Slope > 0)
+    if last_row['OBV_Slope'] > 0:
+        volume_score += 1.0
+        signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流入)")
+    elif last_row['OBV_Slope'] < 0:
+        signal_list.append("❌ OBV 累積量下降 (籌碼流出風險)")
         
-        if price_change > 0 and last_row['OBV_Slope'] > 0:
-            volume_score += 1.0 # 價格和量同步上升
-            signal_list.append("🌟 量價同向健康 (上漲動能強)")
-        elif price_change < 0 and last_row['OBV_Slope'] > 0:
-            # 價格下跌但 OBV 上升：潛在底部吸籌，視為中性偏好
-            volume_score += 0.5
-            signal_list.append("⚠️ 價跌量增 (潛在吸籌)")
-        elif price_change > 0 and last_row['OBV_Slope'] < 0:
-            # 價格上漲但 OBV 下降：無量上漲，視為背離風險
-            volume_score -= 1.0 # 直接扣分反映重大風險
-            signal_list.append("🚨 價漲量縮背離 (量能不足風險)")
-        else:
-            signal_list.append("➖ 量價同向或中性")
+    # 3. OBV 與價格的背離/同向判斷 (最關鍵的 1 分)
+    # 假設收盤價是上漲的，OBV 也上漲，為同向健康
+    price_change = last_row['Close'] - df.iloc[-2]['Close']
     
-    
-        return volume_score, signal_list
+    if price_change > 0 and last_row['OBV_Slope'] > 0:
+        volume_score += 1.0 # 價格和量同步上升
+        signal_list.append("🌟 量價同向健康 (上漲動能強)")
+    elif price_change < 0 and last_row['OBV_Slope'] > 0:
+        # 價格下跌但 OBV 上升：潛在底部吸籌，視為中性偏好
+        volume_score += 0.5
+        signal_list.append("⚠️ 價跌量增 (潛在吸籌)")
+    elif price_change > 0 and last_row['OBV_Slope'] < 0:
+        # 價格上漲但 OBV 下降：無量上漲，視為背離風險
+        volume_score -= 1.0 # 直接扣分反映重大風險
+        signal_list.append("🚨 價漲量縮背離 (量能不足風險)")
+    else:
+        signal_list.append("➖ 量價同向或中性")
+
+
+    return volume_score, signal_list
+
 
 
 # generate_expert_fusion_signal (確認已納入 ATR R:R 風險管理和多指標融合)
-# ⭐️ 優化 2: 修正策略建議中的價格顯示格式，使其對低價/加密貨幣更精確
 def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
     """
     融合了精確的技術分析標準 (MA 排列、RSI 50 中軸、MACD 動能、ADX 濾鏡) 
@@ -586,6 +586,11 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     else:
         ma_score = -1.0
         expert_opinions['趨勢分析 (MA 排列)'] = "空頭：EMA 10 位於 EMA 50 之下。"
+
+    volume_score, volume_signal = calculate_volume_rating(df_clean) # 使用已清理的 df_clean
+    
+    # 將籌碼面的評語加入到專家意見中
+    expert_opinions['籌碼面分析 (OBV/量能)'] = f"評分 {volume_score:.1f}/3.0。 {' / '.join(volume_signal)}"
 
     # 2. 動能專家 (RSI 9)
     momentum_score = 0
@@ -645,8 +650,9 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         expert_opinions['K線形態分析'] = "中性：K線實體小，觀望。"
 
     # 5. 融合評分 (納入 FA Score)
-    fa_normalized_score = ((fa_rating / 9) * 6) - 3 if fa_rating > 0 else 0
-    fusion_score = ma_score + momentum_score + strength_score + kline_score + fa_normalized_score
+    fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
+    volume_normalized_score = (volume_score / 3.0) * 3.0 - 1.5 # 0分 -> -1.5, 3分 -> 1.5
+    fusion_score = ma_score + momentum_score + strength_score + kline_score + fa_normalized_score + volume_normalized_score
     
     # 最終行動
     action = "觀望 (Neutral)"
