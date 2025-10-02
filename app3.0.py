@@ -547,7 +547,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     
     expert_opinions = {}
     
-    # 均線交叉與排列AI (MA Cross & Alignment)
+    # 均線交叉與排列專家 (MA Cross & Alignment)
     ma_score = 0
     ema_10 = last_row['EMA_10']
     ema_50 = last_row['EMA_50']
@@ -575,7 +575,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         ma_score = -1.0
         expert_opinions['趨勢分析 (MA 排列)'] = "空頭：EMA 10 位於 EMA 50 之下。"
 
-    # 籌碼AI評分 (Volume Expert - OBV Slope)
+    # 籌碼專家評分 (Volume Expert - OBV Slope)
     volume_score = 0
     # 這裡假設 'OBV_Slope' 已經在 df 中計算完成
     try:
@@ -587,15 +587,15 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     # 判斷 OBV Slope (斜率)
     if obv_slope > 0:
         volume_score = 2.0  
-        expert_opinions['籌碼AI (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
+        expert_opinions['籌碼專家 (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
     elif obv_slope < 0:
         volume_score = -2.0 
-        expert_opinions['籌碼AI (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
+        expert_opinions['籌碼專家 (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
     else:
         volume_score = 0.5  
-        expert_opinions['籌碼AI (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
+        expert_opinions['籌碼專家 (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
 
-    # 動能AI (RSI 9) 
+    # 動能專家 (RSI 9) 
     momentum_score = 0
     rsi = last_row['RSI']
     
@@ -612,7 +612,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         momentum_score = -1.0 
         expert_opinions['動能分析 (RSI 9)'] = "空頭：RSI < 50 中軸，維持在弱勢區域。"
 
-    # 趨勢強度AI (MACD 8/17/9 & ADX 9) 
+    # 趨勢強度專家 (MACD 8/17/9 & ADX 9) 
     strength_score = 0
     macd_diff = last_row['MACD_Hist']
     prev_macd_diff = prev_row['MACD_Hist']
@@ -635,7 +635,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     else:
         expert_opinions['趨勢強度 (ADX 9)'] = f"盤整：ADX {adx_value:.2f} < 25，信號有效性降低。"
 
-    # K線形態AI (基於 Heikin-Ashi K線 - 專業操盤手濾波)
+    # K線形態專家 (基於 Heikin-Ashi K線 - 專業操盤手濾波)
     kline_score = 0
     # Heikin-Ashi 判斷：Close >= Open 為陽線 (趨勢延續)
     is_ha_up_bar = last_row['Close'] >= last_row['Open'] 
@@ -725,13 +725,13 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
         
     
-    # 最終交易信號與報告 (總結AI意見)
+    # 最終交易信號與報告 (總結專家意見)
     
     # --- 報告列表組裝 ---
     fa_message = fa_rating.get('Message', '基本面數據缺失或不適用。')
-    volume_opinion = expert_opinions.get('籌碼AI (OBV)', '籌碼面數據缺失。')
+    volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
     
-    # 從AI意見中提取簡潔的描述
+    # 從專家意見中提取簡潔的描述
     volume_summary = volume_opinion.split('：')[-1].strip()
 
     total_signal_list = [
@@ -1244,4 +1244,4 @@ if __name__ == '__main__':
     st.markdown("⚠️ **綜合風險與免責聲明 (Risk & Disclaimer)**", unsafe_allow_html=True)
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
-    st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼AI")
+    st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
