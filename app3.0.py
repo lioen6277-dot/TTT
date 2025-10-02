@@ -749,44 +749,55 @@ def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna().copy()
     if df_clean.empty: return go.Figure().update_layout(title="數據不足，無法繪製圖表")
 
-    fig = make_subplots(rows=3, cols=1, 
+    # 🚀 變更：將子圖數量從 3 個調整為 4 個，為 OBV 騰出空間
+    fig = make_subplots(rows=4, cols=1, 
                         shared_xaxes=True, 
-                        vertical_spacing=0.08,
-                        row_heights=[0.6, 0.2, 0.2],
-                        subplot_titles=(f"{symbol} 價格走勢 (週期: {period_key})", "MACD 指標", "RSI/ADX 指標"))
+                        vertical_spacing=0.05, # 減少間距
+                        row_heights=[0.55, 0.15, 0.15, 0.15], # 調整主圖和指標圖的比例
+                        subplot_titles=(f"{symbol} 價格走勢 (週期: {period_key})", 
+                                        "MACD 動能指標", 
+                                        "RSI/ADX 強弱與趨勢指標", 
+                                        "OBV 籌碼/量能趨勢")) # 增加 OBV 標題
 
     # 1. 主圖：K線與均線 (EMA 10, 50, 200)
     fig.add_trace(go.Candlestick(x=df_clean.index, open=df_clean['Open'], high=df_clean['High'], low=df_clean['Low'], close=df_clean['Close'], name='K線', increasing_line_color='#cc0000', decreasing_line_color='#1e8449'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_10'], line=dict(color='#ffab40', width=1), name='EMA 10'), row=1, col=1) 
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_50'], line=dict(color='#0077b6', width=1.5), name='EMA 50'), row=1, col=1) 
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_200'], line=dict(color='#800080', width=1.5, dash='dash'), name='EMA 200'), row=1, col=1) 
-    
-    # 2. MACD 圖 (MACD Line 和 Signal Line)
-    colors = np.where(df_clean['MACD'] > 0, '#cc0000', '#1e8449') 
-    fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['MACD'], name='MACD 柱狀圖', marker_color=colors, opacity=0.5), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Line'], line=dict(color='#0077b6', width=1), name='DIF'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Signal'], line=dict(color='#ffab40', width=1), name='DEA'), row=2, col=1)
-    fig.update_yaxes(title_text="MACD", row=2, col=1)
 
-    # 3. RSI 圖 (包含 ADX)
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['RSI'], line=dict(color='purple', width=1.5), name='RSI'), row=3, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1, annotation_text="超買 (70)", annotation_position="top right")
-    fig.add_hline(y=50, line_dash="dash", line_color="grey", row=3, col=1, annotation_text="多/空分界 (50)", annotation_position="top left")
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1, annotation_text="超賣 (30)", annotation_position="bottom right")
-    fig.update_yaxes(title_text="RSI", range=[0, 100], row=3, col=1)
-    
-    # ADX - 使用第二個 Y 軸 (右側)
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['ADX'], line=dict(color='#cc6600', width=1.5, dash='dot'), name='ADX', yaxis='y4'), row=3, col=1)
-    fig.update_layout(yaxis4=dict(title="ADX", overlaying='y3', side='right', range=[0, 100], showgrid=False))
-    fig.add_hline(y=25, line_dash="dot", line_color="#cc6600", row=3, col=1, annotation_text="強勢趨勢 (ADX 25)", annotation_position="bottom left", yref='y4')
+    # 2. MACD 動能指標
+    # MACD Bar
+    macd_colors = ['#cc0000' if val >= 0 else '#1e8449' for val in df_clean['MACD_Hist']]
+    fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['MACD_Hist'], name='MACD 柱', marker_color=macd_colors), row=2, col=1)
+    # MACD Line
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD'], line=dict(color='black', width=1), name='MACD 線'), row=2, col=1)
+    # MACD Signal Line
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Signal'], line=dict(color='#ffab40', width=1), name='Signal 線'), row=2, col=1)
+    fig.update_yaxes(title_text="MACD", row=2, col=1, fixedrange=True)
+
+
+    # 3. RSI/ADX 強弱與趨勢指標
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['RSI'], line=dict(color='#0077b6', width=1.5), name='RSI'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['ADX'], line=dict(color='#800080', width=1.5, dash='dot'), name='ADX'), row=3, col=1) # 新增 ADX
+    fig.update_yaxes(range=[0, 100], row=3, col=1, fixedrange=True)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1, opacity=0.5)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1, opacity=0.5)
+
+    # 4. 籌碼/量能指標 (OBV)
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['OBV'], line=dict(color='#1e8449', width=1.5), name='OBV'), row=4, col=1)
+    fig.update_yaxes(title_text="OBV", row=4, col=1, fixedrange=True)
+
 
     fig.update_layout(
+        title_text=f"AI 融合分析圖表", 
+        height=1000, 
         xaxis_rangeslider_visible=False,
-        hovermode="x unified",
-        margin=dict(l=20, r=20, t=40, b=20),
-        height=700,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+
+    # 隱藏所有非主圖的 X 軸標籤
+    for i in range(1, 4):
+        fig.update_xaxes(showticklabels=False, row=i, col=1)
 
     return fig
 
