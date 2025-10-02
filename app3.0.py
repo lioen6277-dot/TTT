@@ -540,8 +540,7 @@ def calculate_volume_rating(df):
 
 
 
-# generate_expert_fusion_signal (確認已納入 ATR R:R 風險管理和多指標融合)
-def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
+# generate_expert_fusion_signal (確認已納入 ATR R:R 風險管理和多指標融合)def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
     """
     融合了精確的技術分析標準 (MA 排列、RSI 50 中軸、MACD 動能、ADX 濾鏡) 
     並納入了 ATR 風險控制 (TP/SL) 和 R:R 2:1 的原則。
@@ -587,12 +586,22 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         ma_score = -1.0
         expert_opinions['趨勢分析 (MA 排列)'] = "空頭：EMA 10 位於 EMA 50 之下。"
 
-    volume_score, volume_signal = calculate_volume_rating(df_clean) # 使用已清理的 df_clean
-    
-    # 將籌碼面的評語加入到專家意見中
-    expert_opinions['籌碼面分析 (OBV/量能)'] = f"評分 {volume_score:.1f}/3.0。 {' / '.join(volume_signal)}"
+    # 2. 【新增】籌碼專家評分 (Volume Expert - OBV Slope)
+    volume_score = 0
+    obv_slope = last_row['OBV_Slope'] # 提取我們計算好的斜率
 
-    # 2. 動能專家 (RSI 9)
+    # 判斷 OBV Slope (斜率)
+    if obv_slope > 0:
+        volume_score = 2.0  # 高分：資金支持
+        expert_opinions['籌碼專家 (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
+    elif obv_slope < 0:
+        volume_score = -2.0 # 負分：資金外逃
+        expert_opinions['籌碼專家 (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
+    else:
+        volume_score = 0.5  # 中性偏多，至少不是負面
+        expert_opinions['籌碼專家 (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
+
+    # 3. 動能專家 (RSI 9) - 原來的 2.
     momentum_score = 0
     rsi = last_row['RSI']
     
@@ -609,7 +618,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         momentum_score = -1.0 
         expert_opinions['動能分析 (RSI 9)'] = "空頭：RSI < 50 中軸，維持在弱勢區域。"
 
-    # 3. 趨勢強度專家 (MACD 8/17/9 & ADX 9)
+    # 4. 趨勢強度專家 (MACD 8/17/9 & ADX 9) - 原來的 3.
     strength_score = 0
     macd_diff = last_row['MACD_Hist']
     prev_macd_diff = prev_row['MACD_Hist']
@@ -632,8 +641,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     else:
         expert_opinions['趨勢強度 (ADX 9)'] = f"盤整：ADX {adx_value:.2f} < 25，信號有效性降低。"
 
-
-# 4. K線形態專家 (基於 Heikin-Ashi K線 - 專業操盤手濾波)
+    # 5. K線形態專家 (基於 Heikin-Ashi K線 - 專業操盤手濾波)
     kline_score = 0
     # Heikin-Ashi 判斷：Close >= Open 為陽線 (趨勢延續)
     is_ha_up_bar = last_row['Close'] >= last_row['Open'] 
@@ -645,10 +653,10 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     is_ha_strong_bear = (not is_ha_up_bar) and (last_row['High'] == last_row['Open'])
 
     if is_ha_strong_bull:
-        kline_score = 1.5 # 更強的信號
+        kline_score = 1.5 
         expert_opinions['K線形態分析'] = "**🚀 HA 強勢多頭**：陽線且無下影線，多頭趨勢**非常穩定**。"
     elif is_ha_strong_bear:
-        kline_score = -1.5 # 更強的信號
+        kline_score = -1.5 
         expert_opinions['K線形態分析'] = "**💀 HA 強勢空頭**：陰線且無上影線，空頭趨勢**非常穩定**。"
     elif is_ha_up_bar:
         kline_score = 0.5
@@ -657,15 +665,17 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         kline_score = -0.5
         expert_opinions['K線形態分析'] = "HA 陰線：趨勢偏空，但有影線（波動或修正）。"
 
-    # 5. 融合評分 (納入 FA Score & Volume Score)
-    # FA 分數正規化：將 9 分基本面分數轉換為 -3 到 +3 的評級權重
+    # 6. 融合評分 (納入 FA Score & Volume Score) - 原來的 5.
     fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
     
-    # 【新增 volume_score 的權重化】
-    # 將 volume score (0-3) 轉換為 -1.5 到 +1.5 的權重，影響力與一個技術指標相當
-    volume_normalized_score = (volume_score / 3.0) * 3.0 - 1.5 
-
-    fusion_score = ma_score + momentum_score + strength_score + kline_score + fa_normalized_score + volume_normalized_score
+    fusion_score = (
+        ma_score 
+        + momentum_score 
+        + strength_score 
+        + kline_score 
+        + fa_normalized_score 
+        + volume_score
+    )
     
     # 最終行動
     action = "觀望 (Neutral)"
@@ -675,16 +685,25 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
         
     # 信心指數
-    MAX_SCORE = 13.75 # 總分 MAX: 3.5 + 2.0 + 4.0 + 1.5 + 3.0 + 1.5 = 15.5
+    MAX_SCORE = 14.25 
     confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
     
-    # 風險控制與交易策略 (R:R 2:1 的原則)
-    risk_multiple = 2.0 # 使用 2.0 ATR 作為風險單位 (您的風險管理原則)
-    reward_multiple = 2.0 # 追求 2:1 的回報風險比
+    # 風險控制與交易策略 (R:R 2:1 的原則 - 引入動態 ATR)
     
+    # 引入動態風險調整邏輯 (ADX 濾波器)
+    if adx_value >= 40:
+        atr_multiplier = 1.0 # 強趨勢 (最緊)
+    elif adx_value >= 25:
+        atr_multiplier = 1.5 # 趨勢中 (標準)
+    else:
+        atr_multiplier = 2.0 # 盤整 (最鬆，避免被洗)
+        
+    # 最終的風險單位 (R) 和報酬單位 (2R)
+    risk_unit = atr_value * atr_multiplier
+    reward_unit = risk_unit * 2.0 # 維持 R:R 2:1 原則
+    
+    # ⭐️ 優化價格顯示精度
     entry_buffer = atr_value * 0.3 # 允許 0.3 ATR 的緩衝
-    
-    # ⭐️ 優化價格顯示精度: 如果價格低於 100 則使用 4 位小數，否則使用 2 位
     price_format = ".4f" if current_price < 100 and not currency_symbol == 'NT$' else ".2f"
     
     entry = current_price
@@ -694,20 +713,20 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
 
     if action in ["買進 (Buy)", "中性偏買 (Hold/Buy)"]:
         entry = current_price - entry_buffer
-        stop_loss = entry - (atr_value * risk_multiple)
-        take_profit = entry + (atr_value * risk_multiple * reward_multiple)
+        stop_loss = entry - risk_unit 
+        take_profit = entry + reward_unit 
         strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}} (± {entry_buffer:,.4f})** 範圍內尋找支撐或等待回調進場。"
     elif action in ["賣出 (Sell/Short)", "中性偏賣 (Hold/Sell)"]:
         entry = current_price + entry_buffer
-        stop_loss = entry + (atr_value * risk_multiple)
-        take_profit = entry - (atr_value * risk_multiple * reward_multiple)
+        stop_loss = entry + risk_unit 
+        take_profit = entry - reward_unit 
         strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}} (± {entry_buffer:,.4f})** 範圍內尋找阻力或等待反彈後進場。"
     
     # 【觀望 (Neutral) 策略的正確 else 邏輯】
     else: # 當 action 是 "觀望 (Neutral)" 時執行
         entry = current_price
-        stop_loss = current_price - (atr_value * risk_multiple) # 觀望策略也給出一個參考止損
-        take_profit = current_price + (atr_value * risk_multiple * reward_multiple) # 觀望策略也給出一個參考止盈
+        stop_loss = current_price - risk_unit 
+        take_profit = current_price + reward_unit 
         strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
         
     
@@ -715,17 +734,21 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     
     # --- 報告列表組裝 ---
     fa_message = fa_rating.get('Message', '基本面數據缺失或不適用。')
+    volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
+    
+    # 從專家意見中提取簡潔的描述
+    volume_summary = volume_opinion.split('：')[-1].strip()
 
     total_signal_list = [
         "--- 評分細項 (Score Breakdown) ---", 
         f"趨勢均線評分 (MA): {ma_score:.1f} / 3.5",
         f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
-        f"強度評分 (MACD+ADX): {strength_score:.1f} / 4.0", 
+        f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
         f"**K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5**", 
         "--- 基本面與籌碼面 ---",
         f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_message})",
-        f"**籌碼面評分 (Volume Score): {volume_score:.1f} / 3.0 ({' / '.join(volume_signal)})**" # ✅ 修正一：新增 Volume Score 報告
-    ] 
+        f"**籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_summary})**"    
+ ]
     
     # 組合所有的意見，形成最終返回給 Streamlit 顯示的詳細列表
     all_signals_details = list(expert_opinions.values()) + total_signal_list
