@@ -258,7 +258,7 @@ def get_technical_data_df(df):
     
     indicators['價格 vs. EMA 10/50/200'] = last_row['Close']
     indicators['RSI (9) 動能'] = last_row['RSI']
-    indicators['MACD (8/17/9) 柱狀圖'] = last_row['MACD']
+    indicators['MACD (8/17/9) 柱狀圖'] = last_row['MACD_Hist']
     indicators['ADX (9) 趨勢強度'] = last_row['ADX']
     indicators['ATR (9) 波動性'] = last_row['ATR']
     indicators['布林通道 (BB: 20/2)'] = last_row['Close']
@@ -297,9 +297,9 @@ def get_technical_data_df(df):
 
         elif 'MACD' in name:
             # 判斷 MACD 柱狀圖是否放大
-            if value > 0 and value > prev_row['MACD']:
+            if value > 0 and value > prev_row['MACD_Hist']:
                 conclusion, color = "強化：多頭動能增強 (紅柱放大)", "red"
-            elif value < 0 and value < prev_row['MACD']:
+            elif value < 0 and value < prev_row['MACD_Hist']: 
                 conclusion, color = "削弱：空頭動能增強 (綠柱放大)", "green"
             else:
                 conclusion, color = "中性：動能盤整 (柱狀收縮)", "orange"
