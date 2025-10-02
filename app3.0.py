@@ -91,7 +91,6 @@ FULL_SYMBOLS_MAP = {
     "AVAX-USD": {"name": "Avalanche", "keywords": ["Avalanche", "AVAX", "AVAX-USDT"]},
     "DOT-USD": {"name": "Polkadot", "keywords": ["Polkadot", "DOT", "DOT-USDT"]},
     "LINK-USD": {"name": "Chainlink", "keywords": ["Chainlink", "LINK", "LINK-USDT"]},
-    "PEPE-USD": {"name": "佩佩幣", "keywords": ["佩佩幣", "PEPE", "PEPE-USDT"]},
 }
 
 CATEGORY_MAP = {
