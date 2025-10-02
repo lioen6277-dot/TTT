@@ -186,38 +186,31 @@ def calculate_technical_indicators(df):
     df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50) 
     df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=200) 
     
-    
     macd_instance = ta.trend.MACD(df['Close'], window_fast=8, window_slow=17, window_sign=9)
     df['MACD_Line'] = macd_instance.macd()
     df['MACD_Signal'] = macd_instance.macd_signal()
     df['MACD_Hist'] = macd_instance.macd_diff() 
     
-    
     df['RSI'] = ta.momentum.rsi(df['Close'], window=9)
-    
     
     df['BB_High'] = ta.volatility.bollinger_hband(df['Close'], window=20, window_dev=2)
     df['BB_Low'] = ta.volatility.bollinger_lband(df['Close'], window=20, window_dev=2)
     
-    
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=9)
-    
-    
+   
     df['ADX'] = ta.trend.adx(df['High'], df['Low'], df['Close'], window=9)
-    
     
     df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20) 
 
-    
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     
     df['Volume_MA_20'] = df['Volume'].rolling(window=20).mean()
 
-    
-    
     df['OBV_EMA_20'] = ta.trend.ema_indicator(df['OBV'], window=20)
     df['OBV_Slope'] = df['OBV_EMA_20'].diff()
+
+    df.fillna(method='ffill', inplace=True)
     
     return df
 
@@ -1224,4 +1217,3 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
-
