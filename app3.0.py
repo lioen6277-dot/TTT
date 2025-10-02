@@ -180,8 +180,7 @@ def get_currency_symbol(symbol):
     else: return currency_code + ' '
 
 def calculate_technical_indicators(df):
-    
-    
+ 
     df['EMA_10'] = ta.trend.ema_indicator(df['Close'], window=10) 
     df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50) 
     df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=200) 
@@ -213,6 +212,38 @@ def calculate_technical_indicators(df):
     df.fillna(method='ffill', inplace=True)
     
     return df
+
+@st.cache_data(ttl=3600, show_spinner="正在獲取長期趨勢濾鏡...")
+def get_long_term_context(symbol):
+    """
+    專門獲取日線等級的長期趨勢數據，用於 MTF 濾鏡。
+    固定使用 5 年 / 1 日 週期。
+    """
+    LT_PERIOD, LT_INTERVAL = ("5y", "1d") 
+    
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period=LT_PERIOD, interval=LT_INTERVAL)
+        
+        if df.empty: return None, None
+        
+        df.columns = [col.capitalize() for col in df.columns] 
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']] 
+        df.dropna(how='all', inplace=True) 
+        df = df[~df.index.duplicated(keep='first')] 
+        df = df.iloc[:-1] 
+        
+        if df.empty: return None, None
+        
+        lt_df = calculate_technical_indicators(df)
+        
+        long_term_ema_200 = lt_df['EMA_200'].iloc[-1]
+        long_term_adx = lt_df['ADX'].iloc[-1]
+        
+        return long_term_ema_200, long_term_adx
+        
+    except Exception as e:
+        return None, None
 
 def get_technical_data_df(df):
     """獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。"""
@@ -506,10 +537,8 @@ def calculate_volume_rating(df):
     return volume_score, signal_list
 
 
-def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
-    """
-    
-    """
+def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$", long_term_ema_200=None, long_term_adx=None, latest_vix=None):
+
     
     df_clean = df.dropna().copy()
     if df_clean.empty or len(df_clean) < 2:
@@ -635,6 +664,24 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         kline_score = -0.5
         expert_opinions['K線形態分析'] = "HA 陰線：趨勢偏空，但有影線（波動或修正）。"
 
+    vix_score = 0
+    
+    if latest_vix is not None:
+        
+        if latest_vix >= 30:
+            vix_score = 1.0 
+            expert_opinions['情緒專家 (VIX)'] = f"**恐慌入場 (VIX {latest_vix:.2f})**：市場情緒極度恐慌，有利於逆勢買入，分數 +1.0。"
+        
+        elif latest_vix <= 15:
+            vix_score = -1.0
+            expert_opinions['情緒專家 (VIX)'] = f"**貪婪警告 (VIX {latest_vix:.2f})**：市場過於自滿，潛在反轉風險高，分數 -1.0。"
+            
+        else: 
+            expert_opinions['情緒專家 (VIX)'] = f"市場情緒中性 (VIX {latest_vix:.2f})，不影響當前信號。"
+            
+    else:
+        expert_opinions['情緒專家 (VIX)'] = "情緒指標：數據缺失或不適用 (非美股)。"
+
     
     
     fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
@@ -646,6 +693,8 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         + kline_score 
         + fa_normalized_score 
         + volume_score
+        + mtf_score 
+        + vix_score
     )
     
     
@@ -656,7 +705,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
         
     
-    MAX_SCORE = 14.25 
+    MAX_SCORE = 18.25 
     confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
     
     
@@ -714,6 +763,8 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
         f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
         f"**K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5**", 
+        f"多時間框架濾鏡 (MTF): {mtf_score:.2f} / 3.0", 
+        f"**情緒評分 (VIX): {vix_score:.1f} / 1.0**",
         "--- 基本面與籌碼面 ---",
         f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_message})",
         f"**籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_summary})**"
