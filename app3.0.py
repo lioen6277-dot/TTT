@@ -276,16 +276,6 @@ def get_vix_context():
     except Exception as e:
         return None, None
 
-    latest_vix = get_vix_context()
-    
-    analysis_result = generate_expert_fusion_signal(
-        current_df, 
-        fa_rating, 
-        long_term_ema_200=long_term_ema_200, 
-        long_term_adx=long_term_adx,
-        latest_vix=latest_vix 
-    )
-
 def get_technical_data_df(df):
     """獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。"""
     
@@ -753,7 +743,7 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
         
     
-    MAX_SCORE = 18.25 
+    MAX_SCORE = 18.25
     confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
     
     
