@@ -240,10 +240,51 @@ def get_long_term_context(symbol):
         long_term_ema_200 = lt_df['EMA_200'].iloc[-1]
         long_term_adx = lt_df['ADX'].iloc[-1]
         
+        return long_term_ema_200, long_term_adx         
+    except Exception as e:
+        return None, None
+
+@st.cache_data(ttl=3600, show_spinner="正在獲取市場情緒指標...")
+def get_vix_context():
+    """
+    獲取 CBOE 波動率指數 (VIX) 的最新收盤價。
+    VIX 代碼為 ^VIX。
+    """
+    VIX_PERIOD, VIX_INTERVAL = ("30d", "1d")
+    
+    try:
+        ticker = yf.Ticker("^VIX") 
+        df = ticker.history(period=VIX_PERIOD, interval=VIX_INTERVAL)
+        
+        if df.empty: return None
+        
+        latest_vix = df['Close'].iloc[-1]
+        
+        return latest_vix
+        
+    except Exception as e:
+        return None
+
+        
+        lt_df = calculate_technical_indicators(df)
+        
+        long_term_ema_200 = lt_df['EMA_200'].iloc[-1]
+        long_term_adx = lt_df['ADX'].iloc[-1]
+        
         return long_term_ema_200, long_term_adx
         
     except Exception as e:
         return None, None
+
+    latest_vix = get_vix_context()
+    
+    analysis_result = generate_expert_fusion_signal(
+        current_df, 
+        fa_rating, 
+        long_term_ema_200=long_term_ema_200, 
+        long_term_adx=long_term_adx,
+        latest_vix=latest_vix 
+    )
 
 def get_technical_data_df(df):
     """獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。"""
@@ -479,7 +520,7 @@ def calculate_fundamental_rating(symbol):
         
         
         if combined_rating >= 7:
-            message = "頂級優異 (強護城河)：基本面極健康，**ROE > 15%**，成長與估值俱佳，適合長期持有。"
+            message = "頂級優異 ：基本面極健康，**ROE > 15%**，成長與估值俱佳，適合長期持有。"
         elif combined_rating >= 5:
             message = "良好穩健：財務結構穩固，但可能在估值或 ROE 方面有待加強。"
         elif combined_rating >= 3:
@@ -538,7 +579,14 @@ def calculate_volume_rating(df):
 
 
 def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$", long_term_ema_200=None, long_term_adx=None, latest_vix=None):
-
+    
+    ma_score = 0
+    volume_score = 0
+    momentum_score = 0
+    strength_score = 0
+    kline_score = 0
+    mtf_score = 0
+    vix_score = 0
     
     df_clean = df.dropna().copy()
     if df_clean.empty or len(df_clean) < 2:
