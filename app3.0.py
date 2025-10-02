@@ -540,7 +540,8 @@ def calculate_volume_rating(df):
 
 
 
-# generate_expert_fusion_signal (確認已納入 ATR R:R 風險管理和多指標融合)def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
+# generate_expert_fusion_signal (確認已納入 ATR R:R 風險管理和多指標融合)
+def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
     """
     融合了精確的技術分析標準 (MA 排列、RSI 50 中軸、MACD 動能、ADX 濾鏡) 
     並納入了 ATR 風險控制 (TP/SL) 和 R:R 2:1 的原則。
@@ -568,16 +569,16 @@ def calculate_volume_rating(df):
     curr_10_above_50 = ema_10 > ema_50
     
     if not prev_10_above_50 and curr_10_above_50:
-        ma_score = 3.5 # 黃金交叉
+        ma_score = 3.5 
         expert_opinions['趨勢分析 (MA 交叉)'] = "**🚀 黃金交叉 (GC)**：EMA 10 向上穿越 EMA 50，強勁看漲信號！"
     elif prev_10_above_50 and not curr_10_above_50:
-        ma_score = -3.5 # 死亡交叉
+        ma_score = -3.5 
         expert_opinions['趨勢分析 (MA 交叉)'] = "**💀 死亡交叉 (DC)**：EMA 10 向下穿越 EMA 50，強勁看跌信號！"
     elif ema_10 > ema_50 and ema_50 > ema_200:
-        ma_score = 2.0 # 強多頭排列 (10 > 50 > 200)
+        ma_score = 2.0 
         expert_opinions['趨勢分析 (MA 排列)'] = "強勢多頭排列：**10 > 50 > 200**，趨勢結構穩固。"
     elif ema_10 < ema_50 and ema_50 < ema_200:
-        ma_score = -2.0 # 強空頭排列
+        ma_score = -2.0 
         expert_opinions['趨勢分析 (MA 排列)'] = "強勢空頭排列：**10 < 50 < 200**，趨勢結構崩潰。"
     elif curr_10_above_50:
         ma_score = 1.0
@@ -586,22 +587,27 @@ def calculate_volume_rating(df):
         ma_score = -1.0
         expert_opinions['趨勢分析 (MA 排列)'] = "空頭：EMA 10 位於 EMA 50 之下。"
 
-    # 2. 【新增】籌碼專家評分 (Volume Expert - OBV Slope)
+    # 2. 籌碼專家評分 (Volume Expert - OBV Slope)
     volume_score = 0
-    obv_slope = last_row['OBV_Slope'] # 提取我們計算好的斜率
-
+    # 這裡假設 'OBV_Slope' 已經在 df 中計算完成
+    try:
+        obv_slope = last_row['OBV_Slope']
+    except KeyError:
+        # 如果數據不完整，設置中性分數
+        obv_slope = 0 
+    
     # 判斷 OBV Slope (斜率)
     if obv_slope > 0:
-        volume_score = 2.0  # 高分：資金支持
+        volume_score = 2.0  
         expert_opinions['籌碼專家 (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
     elif obv_slope < 0:
-        volume_score = -2.0 # 負分：資金外逃
+        volume_score = -2.0 
         expert_opinions['籌碼專家 (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
     else:
-        volume_score = 0.5  # 中性偏多，至少不是負面
+        volume_score = 0.5  
         expert_opinions['籌碼專家 (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
 
-    # 3. 動能專家 (RSI 9) - 原來的 2.
+    # 3. 動能專家 (RSI 9) 
     momentum_score = 0
     rsi = last_row['RSI']
     
@@ -618,7 +624,7 @@ def calculate_volume_rating(df):
         momentum_score = -1.0 
         expert_opinions['動能分析 (RSI 9)'] = "空頭：RSI < 50 中軸，維持在弱勢區域。"
 
-    # 4. 趨勢強度專家 (MACD 8/17/9 & ADX 9) - 原來的 3.
+    # 4. 趨勢強度專家 (MACD 8/17/9 & ADX 9) 
     strength_score = 0
     macd_diff = last_row['MACD_Hist']
     prev_macd_diff = prev_row['MACD_Hist']
@@ -636,7 +642,7 @@ def calculate_volume_rating(df):
 
     # ADX 確認 (ADX > 25 確認強趨勢)
     if adx_value > 25:
-        strength_score *= 1.5 # 趨勢強度大於 25 時，強化信號
+        strength_score *= 1.5 
         expert_opinions['趨勢強度 (ADX 9)'] = f"**確認強趨勢**：ADX {adx_value:.2f} > 25，信號有效性高。"
     else:
         expert_opinions['趨勢強度 (ADX 9)'] = f"盤整：ADX {adx_value:.2f} < 25，信號有效性降低。"
@@ -665,7 +671,8 @@ def calculate_volume_rating(df):
         kline_score = -0.5
         expert_opinions['K線形態分析'] = "HA 陰線：趨勢偏空，但有影線（波動或修正）。"
 
-    # 6. 融合評分 (納入 FA Score & Volume Score) - 原來的 5.
+    # 6. 融合評分 (納入 FA Score & Volume Score)
+    # FA 分數正規化：將 9 分基本面分數轉換為 -3 到 +3 的評級權重
     fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
     
     fusion_score = (
@@ -685,7 +692,7 @@ def calculate_volume_rating(df):
     elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
         
     # 信心指數
-    MAX_SCORE = 14.25 
+    MAX_SCORE = 14.25 # (3.5 + 2.0 + 2.25 + 1.5 + 3.0 + 2.0)
     confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
     
     # 風險控制與交易策略 (R:R 2:1 的原則 - 引入動態 ATR)
@@ -747,25 +754,34 @@ def calculate_volume_rating(df):
         f"**K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5**", 
         "--- 基本面與籌碼面 ---",
         f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_message})",
-        f"**籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_summary})**"    
- ]
+        f"**籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_summary})**"
+    ]
     
-    # 組合所有的意見，形成最終返回給 Streamlit 顯示的詳細列表
-    all_signals_details = list(expert_opinions.values()) + total_signal_list
+    # 確保價格格式
+    def format_price(p):
+        if p == 0 or p == current_price:
+            return 0
+        return round(p, 4) if current_price < 100 else round(p, 2)
+        
+    # 將 total_signal_list 轉換為單一字串，以便於在外部使用 (如 Streamlit)
+    full_report = "\n".join(total_signal_list)
     
-    # 最終的回傳字典 (確保這是整個函數中唯一的 return)
+    # 在 expert_opinions 中加入策略描述和報告列表，方便傳輸
+    expert_opinions['策略描述'] = strategy_desc
+    expert_opinions['詳細報告列表'] = full_report
+    
     return {
         'action': action,
         'score': round(fusion_score, 2),
-        'confidence': round(confidence, 0),
-        'strategy': strategy_desc,
-        'entry_price': entry,
-        'take_profit': take_profit,
-        'stop_loss': stop_loss,
-        'current_price': current_price,
+        'confidence': min(100, round(confidence, 1)),
+        'strategy': strategy_desc, # 返回更詳細的策略描述
+        'entry_price': format_price(entry),
+        'take_profit': format_price(take_profit),
+        'stop_loss': format_price(stop_loss),
+        'current_price': round(current_price, 4),
         'expert_opinions': expert_opinions,
-        'atr': atr_value,
-        'signal_list': all_signals_details # 確保返回組裝好的所有信號列表
+        'atr': round(atr_value, 4),
+        'risk_multiple_used': atr_multiplier # 新增回傳實際使用的 ATR 乘數
     }
 
 def create_comprehensive_chart(df, symbol, period_key):
