@@ -770,7 +770,7 @@ def create_comprehensive_chart(df, symbol, period_key):
     macd_colors = ['#cc0000' if val >= 0 else '#1e8449' for val in df_clean['MACD_Hist']]
     fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['MACD_Hist'], name='MACD 柱', marker_color=macd_colors), row=2, col=1)
     # MACD Line
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD'], line=dict(color='black', width=1), name='MACD 線'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Line'], line=dict(color='black', width=1), name='MACD 線'), row=2, col=1)
     # MACD Signal Line
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Signal'], line=dict(color='#ffab40', width=1), name='Signal 線'), row=2, col=1)
     fig.update_yaxes(title_text="MACD", row=2, col=1, fixedrange=True)
