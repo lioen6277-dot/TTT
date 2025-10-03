@@ -10,6 +10,8 @@ import time
 import re
 from datetime import datetime, timedelta
 import requests  # For news API
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import json
 
 warnings.filterwarnings('ignore')
@@ -313,11 +315,11 @@ def calculate_fundamental_rating(ticker):
     except:
         return {'rating': 0, 'Message': '基本面數據不足'}
 
-def simple_sentiment_analysis(texts):
+def simple_sentiment_analysis(text):
     # Simple keyword-based sentiment (since no VADER)
-    positive = sum(1 for t in texts if any(word in t.lower() for word in ['good', 'positive', 'growth', 'buy']))
-    negative = sum(1 for t in texts if any(word in t.lower() for word in ['bad', 'negative', 'decline', 'sell']))
-    return (positive - negative) / max(len(texts), 1)
+    positive = sum(1 for t in text if any(word in t.lower() for word in ['good', 'positive', 'growth', 'buy']))
+    negative = sum(1 for t in text if any(word in t.lower() for word in ['bad', 'negative', 'decline', 'sell']))
+    return (positive - negative) / max(len(text), 1)
 
 def detect_support_resistance(df):
     # Simple min/max for support/resistance
