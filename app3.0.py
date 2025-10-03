@@ -10,9 +10,6 @@ import time
 import re
 from datetime import datetime, timedelta
 import requests  # For news API
-from scipy.stats import linregress
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import json
 
 warnings.filterwarnings('ignore')
@@ -558,9 +555,13 @@ def run_backtest(df, symbol, sl_pct=0.05, tp_pct=0.1):
     bench_df = yf.download(bench_symbol, start=df.index.min(), end=df.index.max())['Close']
     bench_returns = bench_df.pct_change().reindex(df.index).fillna(0)
     bench_returns = bench_returns.iloc[1:]  # Align
-    result = linregress(bench_returns, returns.iloc[1:])
-    beta = result.slope
-    alpha = result.intercept * 252  # Annualized
+    if len(bench_returns) > 1 and len(returns.iloc[1:]) > 1:
+        slope, intercept = np.polyfit(bench_returns, returns.iloc[1:], 1)
+        beta = slope
+        alpha = intercept * 252  # Annualized
+    else:
+        alpha = 0
+        beta = 0
     
     total_trades = len(trades)
     
