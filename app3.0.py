@@ -180,101 +180,46 @@ def get_currency_symbol(symbol):
     else: return currency_code + ' '
 
 def calculate_technical_indicators(df):
- 
+    
+    
     df['EMA_10'] = ta.trend.ema_indicator(df['Close'], window=10) 
     df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50) 
     df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=200) 
+    
     
     macd_instance = ta.trend.MACD(df['Close'], window_fast=8, window_slow=17, window_sign=9)
     df['MACD_Line'] = macd_instance.macd()
     df['MACD_Signal'] = macd_instance.macd_signal()
     df['MACD_Hist'] = macd_instance.macd_diff() 
     
+    
     df['RSI'] = ta.momentum.rsi(df['Close'], window=9)
+    
     
     df['BB_High'] = ta.volatility.bollinger_hband(df['Close'], window=20, window_dev=2)
     df['BB_Low'] = ta.volatility.bollinger_lband(df['Close'], window=20, window_dev=2)
     
+    
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=9)
-   
+    
+    
     df['ADX'] = ta.trend.adx(df['High'], df['Low'], df['Close'], window=9)
+    
     
     df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20) 
 
+    
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     
     df['Volume_MA_20'] = df['Volume'].rolling(window=20).mean()
 
+    
+    
     df['OBV_EMA_20'] = ta.trend.ema_indicator(df['OBV'], window=20)
     df['OBV_Slope'] = df['OBV_EMA_20'].diff()
-
-    df.fillna(method='ffill', inplace=True)
     
     return df
-
-@st.cache_data(ttl=3600, show_spinner="正在獲取長期趨勢濾鏡...")
-def get_long_term_context(symbol):
-    """
-    專門獲取日線等級的長期趨勢數據，用於 MTF 濾鏡。
-    固定使用 5 年 / 1 日 週期。
-    """
-    LT_PERIOD, LT_INTERVAL = ("5y", "1d") 
-    
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=LT_PERIOD, interval=LT_INTERVAL)
-        
-        if df.empty: return None, None
-        
-        df.columns = [col.capitalize() for col in df.columns] 
-        df = df[['Open', 'High', 'Low', 'Close', 'Volume']] 
-        df.dropna(how='all', inplace=True) 
-        df = df[~df.index.duplicated(keep='first')] 
-        df = df.iloc[:-1] 
-        
-        if df.empty: return None, None
-        
-        lt_df = calculate_technical_indicators(df)
-        
-        long_term_ema_200 = lt_df['EMA_200'].iloc[-1]
-        long_term_adx = lt_df['ADX'].iloc[-1]
-        
-        return long_term_ema_200, long_term_adx         
-    except Exception as e:
-        return None, None
-
-@st.cache_data(ttl=3600, show_spinner="正在獲取市場情緒指標...")
-def get_vix_context():
-    """
-    獲取 CBOE 波動率指數 (VIX) 的最新收盤價。
-    VIX 代碼為 ^VIX。
-    """
-    VIX_PERIOD, VIX_INTERVAL = ("30d", "1d")
-    
-    try:
-        ticker = yf.Ticker("^VIX") 
-        df = ticker.history(period=VIX_PERIOD, interval=VIX_INTERVAL)
-        
-        if df.empty: return None
-        
-        latest_vix = df['Close'].iloc[-1]
-        
-        return latest_vix
-        
-    except Exception as e:
-        return None
-
-        
-        lt_df = calculate_technical_indicators(df)
-        
-        long_term_ema_200 = lt_df['EMA_200'].iloc[-1]
-        long_term_adx = lt_df['ADX'].iloc[-1]
-        
-        return long_term_ema_200, long_term_adx
-        
-    except Exception as e:
-        return None, None
 
 def get_technical_data_df(df):
     """獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。"""
@@ -510,7 +455,7 @@ def calculate_fundamental_rating(symbol):
         
         
         if combined_rating >= 7:
-            message = "頂級優異 ：基本面極健康，**ROE > 15%**，成長與估值俱佳，適合長期持有。"
+            message = "頂級優異 (強護城河)：基本面極健康，**ROE > 15%**，成長與估值俱佳，適合長期持有。"
         elif combined_rating >= 5:
             message = "良好穩健：財務結構穩固，但可能在估值或 ROE 方面有待加強。"
         elif combined_rating >= 3:
@@ -568,15 +513,10 @@ def calculate_volume_rating(df):
     return volume_score, signal_list
 
 
-def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$", long_term_ema_200=None, long_term_adx=None, latest_vix=None):
+def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
+    """
     
-    ma_score = 0
-    volume_score = 0
-    momentum_score = 0
-    strength_score = 0
-    kline_score = 0
-    mtf_score = 0
-    vix_score = 0
+    """
     
     df_clean = df.dropna().copy()
     if df_clean.empty or len(df_clean) < 2:
@@ -702,24 +642,6 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         kline_score = -0.5
         expert_opinions['K線形態分析'] = "HA 陰線：趨勢偏空，但有影線（波動或修正）。"
 
-    vix_score = 0
-    
-    if latest_vix is not None:
-        
-        if latest_vix >= 30:
-            vix_score = 1.0 
-            expert_opinions['情緒專家 (VIX)'] = f"**恐慌入場 (VIX {latest_vix:.2f})**：市場情緒極度恐慌，有利於逆勢買入，分數 +1.0。"
-        
-        elif latest_vix <= 15:
-            vix_score = -1.0
-            expert_opinions['情緒專家 (VIX)'] = f"**貪婪警告 (VIX {latest_vix:.2f})**：市場過於自滿，潛在反轉風險高，分數 -1.0。"
-            
-        else: 
-            expert_opinions['情緒專家 (VIX)'] = f"市場情緒中性 (VIX {latest_vix:.2f})，不影響當前信號。"
-            
-    else:
-        expert_opinions['情緒專家 (VIX)'] = "情緒指標：數據缺失或不適用 (非美股)。"
-
     
     
     fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
@@ -731,109 +653,98 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
         + kline_score 
         + fa_normalized_score 
         + volume_score
-        + mtf_score 
+        + mtf_score
         + vix_score
+
     )
     
-    
-    action = "觀望 (Neutral)"
-    if fusion_score >= 4.0: action = "買進 (Buy)"
-    elif fusion_score >= 1.0: action = "中性偏買 (Hold/Buy)"
-    elif fusion_score <= -4.0: action = "賣出 (Sell/Short)"
-    elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
-        
-    
-    MAX_SCORE = 18.25
-    confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
-    
-    
-    
-    
-    if adx_value >= 40:
-        atr_multiplier = 1.0 
-    elif adx_value >= 25:
-        atr_multiplier = 1.5 
-    else:
-        atr_multiplier = 2.0 
-        
-    
-    risk_unit = atr_value * atr_multiplier
-    reward_unit = risk_unit * 2.0 
-    
-    
-    entry_buffer = atr_value * 0.3 
-    price_format = ".4f" if current_price < 100 and not currency_symbol == 'NT$' else ".2f"
-    
-    entry = current_price
-    stop_loss = current_price - atr_value
-    take_profit = current_price + atr_value
-    strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
 
-    if action in ["買進 (Buy)", "中性偏買 (Hold/Buy)"]:
-        entry = current_price - entry_buffer
-        stop_loss = entry - risk_unit 
-        take_profit = entry + reward_unit 
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}} (± {entry_buffer:,.4f})** 範圍內尋找支撐或等待回調進場。"
-    elif action in ["賣出 (Sell/Short)", "中性偏賣 (Hold/Sell)"]:
-        entry = current_price + entry_buffer
-        stop_loss = entry + risk_unit 
-        take_profit = entry - reward_unit 
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}} (± {entry_buffer:,.4f})** 範圍內尋找阻力或等待反彈後進場。"
-    
-    
-    else: 
-        entry = current_price
-        stop_loss = current_price - risk_unit 
-        take_profit = current_price + reward_unit 
-        strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
-        
-    
-    
-    fa_message = fa_rating.get('Message', '基本面數據缺失或不適用。')
-    volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
-    
-    
-    volume_summary = volume_opinion.split('：')[-1].strip()
+ADX_TREND_THRESHOLD = 25
+BASE_ATR_MULTIPLIER = 2.0 
 
-    total_signal_list = [
-        "--- 評分細項 (Score Breakdown) ---", 
-        f"趨勢均線評分 (MA): {ma_score:.1f} / 3.5",
-        f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
-        f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
-        f"**K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5**", 
-        f"多時間框架濾鏡 (MTF): {mtf_score:.2f} / 3.0", 
-        f"**情緒評分 (VIX): {vix_score:.1f} / 1.0**",
-        "--- 基本面與籌碼面 ---",
-        f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_message})",
-        f"**籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_summary})**"
-    ]
+if adx_value >= 40: # 超強趨勢，可使用更緊密止損
+    atr_multiplier = 1.0 
+    expert_opinions['風險專家 (ATR)'] = f"風險管理：**超強趨勢** (ADX >= 40)，使用 **1.0x ATR** 止損 (R:R 2:1)。"
+elif adx_value > ADX_TREND_THRESHOLD:
+    # 強趨勢時收緊止損
+    atr_multiplier = 1.5 
+    expert_opinions['風險專家 (ATR)'] = f"風險管理：**強趨勢** (ADX > 25)，使用 **1.5x ATR** 止損 (R:R 2:1)。"
+else:
+
+    atr_multiplier = BASE_ATR_MULTIPLIER 
+    expert_opinions['風險專家 (ATR)'] = f"風險管理：**弱勢/盤整** (ADX <= 25)，使用 **2.0x ATR** 止損 (R:R 2:1)。"
+
+risk_unit = atr_value * atr_multiplier 
+reward_unit = risk_unit * 2.0 # 固定 R:R 2:1
+
+
+MAX_SCORE = 18.25 
+confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
+
+action = "觀望 (Neutral)"
+if fusion_score >= 4.0: action = "強力買入 (Strong Buy)"
+elif fusion_score >= 1.0: action = "中性偏買 (Hold/Buy)"
+elif fusion_score <= -4.0: action = "強力賣出 (Strong Sell)"
+elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
+
+entry_buffer = atr_value * 0.3
+price_format = ".4f" if current_price < 100 and not currency_symbol == 'NT$' else ".2f"
+
+entry = current_price
+stop_loss = 0
+take_profit = 0
+strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
+
+if action in ["強力買入 (Strong Buy)", "中性偏買 (Hold/Buy)"]:
+    entry = current_price - entry_buffer # 建議尋找回調支撐
+    stop_loss = entry - risk_unit 
+    take_profit = entry + reward_unit 
+    strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找支撐或等待回調進場。"
     
-    
-    def format_price(p):
-        if p == 0 or p == current_price:
-            return 0
-        return round(p, 4) if current_price < 100 else round(p, 2)
-        
-    
-    full_report = "\n".join(total_signal_list)
-    
-    
-    expert_opinions['策略描述'] = strategy_desc
-    expert_opinions['詳細報告列表'] = full_report
-    
-    return {
-        'action': action,
-        'score': round(fusion_score, 2),
-        'confidence': min(100, round(confidence, 1)),
-        'strategy': strategy_desc, 
-        'entry_price': format_price(entry),
-        'take_profit': format_price(take_profit),
-        'stop_loss': format_price(stop_loss),
-        'current_price': round(current_price, 4),
-        'expert_opinions': expert_opinions,
-        'atr': round(atr_value, 4),
-        'risk_multiple_used': atr_multiplier 
-    }
+elif action in ["強力賣出 (Strong Sell)", "中性偏賣 (Hold/Sell)"]:
+    entry = current_price + entry_buffer # 建議尋找反彈阻力
+    stop_loss = entry + risk_unit 
+    take_profit = entry - reward_unit 
+    strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找阻力或等待反彈後進場。"
+
+
+mtf_opinion = expert_opinions.get('多時間框架 (MTF)', 'MTF 濾鏡數據缺失。')
+vix_opinion = expert_opinions.get('情緒專家 (VIX)', '情緒指標數據缺失。')
+volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
+
+total_signal_list = [
+    "--- 評分細項 (Score Breakdown) ---", 
+    f"趨勢均線評分 (MA): {ma_score:.1f} / 3.5",
+    f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
+    f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
+    f"K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5", 
+    f"**多時間框架濾鏡 (MTF): {mtf_score:.2f} / 3.0 ({mtf_opinion.split('：')[-1].strip()})**", # <--- 新增
+    f"**情緒評分 (VIX): {vix_score:.1f} / 1.0 ({vix_opinion.split('：')[-1].strip()})**",      # <--- 新增
+    "--- 基本面與籌碼面 ---",
+    f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_rating.get('Message', '數據缺失')})",
+    f"籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_opinion.split('：')[-1].strip()})",
+    f"風險單位 (Risk Unit): {currency_symbol}{risk_unit:{price_format}} ({atr_multiplier:.1f}x ATR)" # <--- 新增風險單位顯示
+]
+
+def format_price(p):
+    if p is None or p == 0:
+        return 0
+    return round(p, 4) if current_price < 100 else round(p, 2)
+
+return {
+    'action': action,
+    'score': fusion_score,
+    'confidence': confidence,
+    'strategy': strategy_desc,
+    'entry_price': format_price(entry),
+    'take_profit': format_price(take_profit),
+    'stop_loss': format_price(stop_loss),
+    'current_price': format_price(current_price),
+    'expert_opinions': expert_opinions,
+    'atr': format_price(atr_value),
+    'signal_list': total_signal_list,
+    'currency_symbol': currency_symbol
+}
 
 def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna().copy()
