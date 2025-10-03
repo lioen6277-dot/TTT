@@ -12,8 +12,6 @@ from datetime import datetime, timedelta
 
 warnings.filterwarnings('ignore')
 
-
-
 st.set_page_config(
     page_title="AI趨勢分析📈", 
     page_icon="🚀", 
@@ -488,315 +486,156 @@ def calculate_volume_rating(df):
     
     if last_row['OBV_Slope'] > 0:
         volume_score += 1.0
-        signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流入)")
-    elif last_row['OBV_Slope'] < 0:
-        signal_list.append("❌ OBV 累積量下降 (籌碼流出風險)")
-        
-    
-    price_change = last_row['Close'] - df.iloc[-2]['Close']
-    
-    if price_change > 0 and last_row['OBV_Slope'] > 0:
-        volume_score += 1.0 
-        signal_list.append("🌟 量價同向健康 (上漲動能強)")
-    elif price_change < 0 and last_row['OBV_Slope'] > 0:
-        
-        volume_score += 0.5
-        signal_list.append("⚠️ 價跌量增 (潛在吸籌)")
-    elif price_change > 0 and last_row['OBV_Slope'] < 0:
-        
-        volume_score -= 1.0 
-        signal_list.append("🚨 價漲量縮背離 (量能不足風險)")
+        signal_list.append("✅ OBV 累積量上漲 (籌碼穩健流...")
     else:
-        signal_list.append("➖ 量價同向或中性")
-
+        signal_list.append("➖ OBV 累積量下降或持平")
 
     return volume_score, signal_list
 
-
-def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$", long_term_ema_200=None, long_term_adx=None, latest_vix=None):
+def generate_expert_fusion_signal(df, fa_rating, is_long_term, currency_symbol):
     """
-    
+    基於程式碼原則生成融合信號。
     """
-    
-    df_clean = df.dropna().copy()
-    if df_clean.empty or len(df_clean) < 2:
-        return {'action': '數據不足', 'score': 0, 'confidence': 0, 'strategy': '無法評估', 'entry_price': 0, 'take_profit': 0, 'stop_loss': 0, 'current_price': 0, 'expert_opinions': {}, 'atr': 0}
-
-    last_row = df_clean.iloc[-1]
-    prev_row = df_clean.iloc[-2]
-    current_price = last_row['Close']
-    atr_value = last_row['ATR']
-    adx_value = last_row['ADX'] 
-    
-    expert_opinions = {}
-
-
-    ma_score = 0
-    volume_score = 0
-    momentum_score = 0 
-    strength_score = 0
-    kline_score = 0
-    mtf_score = 0
-    vix_score = 0
-    
-    
-    ma_score = 0
-    ema_10 = last_row['EMA_10']
-    ema_50 = last_row['EMA_50']
-    ema_200 = last_row['EMA_200']
-    
-    prev_10_above_50 = prev_row['EMA_10'] > prev_row['EMA_50']
-    curr_10_above_50 = ema_10 > ema_50
-    
-    if not prev_10_above_50 and curr_10_above_50:
-        ma_score = 3.5 
-        expert_opinions['趨勢分析 (MA 交叉)'] = "**🚀 黃金交叉 (GC)**：EMA 10 向上穿越 EMA 50，強勁看漲信號！"
-    elif prev_10_above_50 and not curr_10_above_50:
-        ma_score = -3.5 
-        expert_opinions['趨勢分析 (MA 交叉)'] = "**💀 死亡交叉 (DC)**：EMA 10 向下穿越 EMA 50，強勁看跌信號！"
-    elif ema_10 > ema_50 and ema_50 > ema_200:
-        ma_score = 2.0 
-        expert_opinions['趨勢分析 (MA 排列)'] = "強勢多頭排列：**10 > 50 > 200**，趨勢結構穩固。"
-    elif ema_10 < ema_50 and ema_50 < ema_200:
-        ma_score = -2.0 
-        expert_opinions['趨勢分析 (MA 排列)'] = "強勢空頭排列：**10 < 50 < 200**，趨勢結構崩潰。"
-    elif curr_10_above_50:
-        ma_score = 1.0
-        expert_opinions['趨勢分析 (MA 排列)'] = "多頭：EMA 10 位於 EMA 50 之上。"
-    else:
-        ma_score = -1.0
-        expert_opinions['趨勢分析 (MA 排列)'] = "空頭：EMA 10 位於 EMA 50 之下。"
-
-    
-    volume_score = 0
-    
-    try:
-        obv_slope = last_row['OBV_Slope']
-    except KeyError:
-        
-        obv_slope = 0 
-    
-    
-    if obv_slope > 0:
-        volume_score = 2.0  
-        expert_opinions['籌碼專家 (OBV)'] = "強化：**資金持續流入** (OBV Slope > 0)，市場共識強勁。"
-    elif obv_slope < 0:
-        volume_score = -2.0 
-        expert_opinions['籌碼專家 (OBV)'] = "警告：**資金持續流出** (OBV Slope < 0)，趨勢缺乏量能支持。"
-    else:
-        volume_score = 0.5  
-        expert_opinions['籌碼專家 (OBV)'] = "中性：OBV 趨勢平穩，等待資金流向明確。"
-
-    
-    momentum_score = 0
-    rsi = last_row['RSI']
-    
-    if rsi > 60:
-        momentum_score = -2.0 
-        expert_opinions['動能分析 (RSI 9)'] = "警告：RSI > 60，動能過熱，潛在回調壓力大。"
-    elif rsi < 40:
-        momentum_score = 2.0 
-        expert_opinions['動能分析 (RSI 9)'] = "強化：RSI < 40，動能低位，潛在反彈空間大。"
-    elif rsi > 50: 
-        momentum_score = 1.0 
-        expert_opinions['動能分析 (RSI 9)'] = "多頭：RSI > 50 中軸，維持在強勢區域。"
-    else:
-        momentum_score = -1.0 
-        expert_opinions['動能分析 (RSI 9)'] = "空頭：RSI < 50 中軸，維持在弱勢區域。"
-
-    
-    strength_score = 0
-    macd_diff = last_row['MACD_Hist']
-    prev_macd_diff = prev_row['MACD_Hist']
-
-    
-    if macd_diff > 0 and macd_diff > prev_macd_diff:
-        strength_score += 1.5
-        expert_opinions['趨勢強度 (MACD)'] = "多頭：MACD 柱狀圖放大，多頭動能強勁。"
-    elif macd_diff < 0 and macd_diff < prev_macd_diff:
-        strength_score -= 1.5
-        expert_opinions['趨勢強度 (MACD)'] = "空頭：MACD 柱狀圖放大，空頭動能強勁。"
-    else:
-        strength_score += 0
-        expert_opinions['趨勢強度 (MACD)'] = "中性：MACD 柱狀圖收縮，動能盤整。"
-
-    
-    if adx_value > 25:
-        strength_score *= 1.5 
-        expert_opinions['趨勢強度 (ADX 9)'] = f"**確認強趨勢**：ADX {adx_value:.2f} > 25，信號有效性高。"
-    else:
-        expert_opinions['趨勢強度 (ADX 9)'] = f"盤整：ADX {adx_value:.2f} < 25，信號有效性降低。"
-
-    
-    kline_score = 0
-    
-    is_ha_up_bar = last_row['Close'] >= last_row['Open'] 
-    
-    
-    is_ha_strong_bull = is_ha_up_bar and (last_row['Low'] == last_row['Open'])
-    
-    
-    is_ha_strong_bear = (not is_ha_up_bar) and (last_row['High'] == last_row['Open'])
-
-    if is_ha_strong_bull:
-        kline_score = 1.5 
-        expert_opinions['K線形態分析'] = "**🚀 HA 強勢多頭**：陽線且無下影線，多頭趨勢**非常穩定**。"
-    elif is_ha_strong_bear:
-        kline_score = -1.5 
-        expert_opinions['K線形態分析'] = "**💀 HA 強勢空頭**：陰線且無上影線，空頭趨勢**非常穩定**。"
-    elif is_ha_up_bar:
-        kline_score = 0.5
-        expert_opinions['K線形態分析'] = "HA 陽線：趨勢偏多，但有影線（波動或修正）。"
-    else:
-        kline_score = -0.5
-        expert_opinions['K線形態分析'] = "HA 陰線：趨勢偏空，但有影線（波動或修正）。"
-
-    
-    
-    fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 6) - 3 if fa_rating['Combined_Rating'] > 0 else -3 
-    
-    fusion_score = (
-        ma_score 
-        + momentum_score 
-        + strength_score 
-        + kline_score 
-        + fa_normalized_score 
-        + volume_score
-        + mtf_score
-        + vix_score
-
-    )
-    
-
-    ADX_TREND_THRESHOLD = 25
-    BASE_ATR_MULTIPLIER = 2.0 
-    
-    if adx_value >= 40: # 超強趨勢，可使用更緊密止損
-        atr_multiplier = 1.0 
-        expert_opinions['風險專家 (ATR)'] = f"風險管理：**超強趨勢** (ADX >= 40)，使用 **1.0x ATR** 止損 (R:R 2:1)。"
-    elif adx_value > ADX_TREND_THRESHOLD:
-        # 強趨勢時收緊止損
-        atr_multiplier = 1.5 
-        expert_opinions['風險專家 (ATR)'] = f"風險管理：**強趨勢** (ADX > 25)，使用 **1.5x ATR** 止損 (R:R 2:1)。"
-    else:
-    
-        atr_multiplier = BASE_ATR_MULTIPLIER 
-        expert_opinions['風險專家 (ATR)'] = f"風險管理：**弱勢/盤整** (ADX <= 25)，使用 **2.0x ATR** 止損 (R:R 2:1)。"
-    
-    risk_unit = atr_value * atr_multiplier 
-    reward_unit = risk_unit * 2.0 # 固定 R:R 2:1
-    
-    
-    MAX_SCORE = 18.25 
-    confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
-    
-    action = "觀望 (Neutral)"
-    if fusion_score >= 4.0: action = "強力買入 (Strong Buy)"
-    elif fusion_score >= 1.0: action = "中性偏買 (Hold/Buy)"
-    elif fusion_score <= -4.0: action = "強力賣出 (Strong Sell)"
-    elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
-    
-    entry_buffer = atr_value * 0.3
-    price_format = ".4f" if current_price < 100 and not currency_symbol == 'NT$' else ".2f"
-    
-    entry = current_price
-    stop_loss = 0
-    take_profit = 0
-    strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
-    
-    if action in ["強力買入 (Strong Buy)", "中性偏買 (Hold/Buy)"]:
-        entry = current_price - entry_buffer # 建議尋找回調支撐
-        stop_loss = entry - risk_unit 
-        take_profit = entry + reward_unit 
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找支撐或等待回調進場。"
-        
-    elif action in ["強力賣出 (Strong Sell)", "中性偏賣 (Hold/Sell)"]:
-        entry = current_price + entry_buffer # 建議尋找反彈阻力
-        stop_loss = entry + risk_unit 
-        take_profit = entry - reward_unit 
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找阻力或等待反彈後進場。"
-    
-    
-    mtf_opinion = expert_opinions.get('多時間框架 (MTF)', 'MTF 濾鏡數據缺失。')
-    vix_opinion = expert_opinions.get('情緒專家 (VIX)', '情緒指標數據缺失。')
-    volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
-    
-    total_signal_list = [
-        "--- 評分細項 (Score Breakdown) ---", 
-        f"趨勢均線評分 (MA): {ma_score:.1f} / 3.5",
-        f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
-        f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
-        f"K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5", 
-        f"**多時間框架濾鏡 (MTF): {mtf_score:.2f} / 3.0 ({mtf_opinion.split('：')[-1].strip()})**", # <--- 新增
-        f"**情緒評分 (VIX): {vix_score:.1f} / 1.0 ({vix_opinion.split('：')[-1].strip()})**",      # <--- 新增
-        "--- 基本面與籌碼面 ---",
-        f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_rating.get('Message', '數據缺失')})",
-        f"籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_opinion.split('：')[-1].strip()})",
-        f"風險單位 (Risk Unit): {currency_symbol}{risk_unit:{price_format}} ({atr_multiplier:.1f}x ATR)" # <--- 新增風險單位顯示
-    ]
-    
-    def format_price(p):
-        if p is None or p == 0:
-            return 0
-        return round(p, 4) if current_price < 100 else round(p, 2)
-    
+    if df.empty:
         return {
-            'action': action,
-            'score': fusion_score,
-            'confidence': confidence,
-            'strategy': strategy_desc,
-            'entry_price': format_price(entry),
-            'take_profit': format_price(take_profit),
-            'stop_loss': format_price(stop_loss),
-            'current_price': format_price(current_price),
-            'expert_opinions': expert_opinions,
-            'atr': format_price(atr_value),
-            'signal_list': total_signal_list,
-            'currency_symbol': currency_symbol
+            'current_price': 0,
+            'action': '中性 (Neutral)',
+            'score': 0,
+            'confidence': 50,
+            'entry_price': 0,
+            'take_profit': 0,
+            'stop_loss': 0,
+            'strategy': '無數據',
+            'atr': 0,
+            'expert_opinions': {}
         }
 
+    last_row = df.iloc[-1]
+    current_price = last_row['Close']
+    atr = last_row.get('ATR', 0)
+
+    # 技術分析判斷
+    ta_score = 0
+    opinions = {}
+
+    # MA 趨勢
+    if last_row['EMA_10'] > last_row['EMA_50'] > last_row['EMA_200']:
+        ta_score += 2
+        opinions['MA 趨勢'] = '強多頭排列'
+    elif last_row['EMA_10'] < last_row['EMA_50'] < last_row['EMA_200']:
+        ta_score -= 2
+        opinions['MA 趨勢'] = '強空頭排列'
+    else:
+        opinions['MA 趨勢'] = '中性'
+
+    # RSI
+    if last_row['RSI'] > 70:
+        ta_score -= 1
+        opinions['RSI'] = '超買'
+    elif last_row['RSI'] < 30:
+        ta_score += 1
+        opinions['RSI'] = '超賣'
+    elif last_row['RSI'] > 50:
+        ta_score += 1
+        opinions['RSI'] = '多頭區間'
+    else:
+        ta_score -= 1
+        opinions['RSI'] = '空頭區間'
+
+    # MACD
+    if last_row['MACD_Hist'] > 0:
+        ta_score += 1
+        opinions['MACD'] = '多頭動能'
+    else:
+        ta_score -= 1
+        opinions['MACD'] = '空頭動能'
+
+    # ADX
+    if last_row['ADX'] > 25:
+        opinions['ADX'] = '強趨勢'
+    else:
+        opinions['ADX'] = '盤整'
+
+    # 基本面
+    fa_score = fa_rating['Combined_Rating'] / 9 * 3 if 'Combined_Rating' in fa_rating else 0
+
+    # 總分
+    total_score = ta_score + fa_score
+    confidence = min(100, abs(total_score) * 20 + 50)
+
+    # 行動
+    if total_score > 2:
+        action = '買進 (Buy)'
+    elif total_score > 0:
+        action = '中性偏買 (Hold/Buy)'
+    elif total_score < -2:
+        action = '賣出 (Sell/Short)'
+    elif total_score < 0:
+        action = '中性偏賣 (Hold/Sell)'
+    else:
+        action = '中性 (Neutral)'
+
+    # 策略點位
+    entry_price = current_price
+    take_profit = current_price + atr * 2 if total_score > 0 else current_price - atr * 2
+    stop_loss = current_price - atr if total_score > 0 else current_price + atr
+    strategy = '基於MA/RSI/MACD融合基本面'
+
+    return {
+        'current_price': current_price,
+        'action': action,
+        'score': total_score,
+        'confidence': confidence,
+        'entry_price': entry_price,
+        'take_profit': take_profit,
+        'stop_loss': stop_loss,
+        'strategy': strategy,
+        'atr': atr,
+        'expert_opinions': opinions
+    }
+
 def create_comprehensive_chart(df, symbol, period_key):
-    df_clean = df.dropna().copy()
-    if df_clean.empty: return go.Figure().update_layout(title="數據不足，無法繪製圖表")
+    df_clean = df.dropna()
+    if df_clean.empty:
+        return go.Figure()
 
-    
-    fig = make_subplots(rows=4, cols=1, 
-                        shared_xaxes=True, 
-                        vertical_spacing=0.05, 
-                        row_heights=[0.55, 0.15, 0.15, 0.15], 
-                        subplot_titles=(f"{symbol} 價格走勢 (週期: {period_key})", 
-                                        "MACD 動能指標", 
-                                        "RSI/ADX 強弱與趨勢指標", 
-                                        "OBV 籌碼/量能趨勢")) 
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.02,
+                        row_heights=[0.5, 0.15, 0.15, 0.2],
+                        specs=[[{"secondary_y": True}], [{}], [{}], [{}]])
 
-    
-    fig.add_trace(go.Candlestick(x=df_clean.index, open=df_clean['Open'], high=df_clean['High'], low=df_clean['Low'], close=df_clean['Close'], name='K線', increasing_line_color='#cc0000', decreasing_line_color='#1e8449'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_10'], line=dict(color='#ffab40', width=1), name='EMA 10'), row=1, col=1) 
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_50'], line=dict(color='#0077b6', width=1.5), name='EMA 50'), row=1, col=1) 
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_200'], line=dict(color='#800080', width=1.5, dash='dash'), name='EMA 200'), row=1, col=1) 
+    # K線
+    fig.add_trace(go.Candlestick(x=df_clean.index,
+                                 open=df_clean['Open'], high=df_clean['High'],
+                                 low=df_clean['Low'], close=df_clean['Close'],
+                                 name='K線'), row=1, col=1)
 
-    
-    
-    macd_colors = ['#cc0000' if val >= 0 else '#1e8449' for val in df_clean['MACD_Hist']]
-    fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['MACD_Hist'], name='MACD 柱', marker_color=macd_colors), row=2, col=1)
-    
-    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Line'], line=dict(color='black', width=1), name='MACD 線'), row=2, col=1)
+    # MA
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_10'], line=dict(color='orange', width=1), name='EMA 10'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_50'], line=dict(color='blue', width=1), name='EMA 50'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['EMA_200'], line=dict(color='red', width=1), name='EMA 200'), row=1, col=1)
+
+    # 成交量
+    fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['Volume'], marker_color='grey', name='成交量'), row=1, col=1, secondary_y=True)
+    fig.update_yaxes(title_text="價格", row=1, col=1)
+    fig.update_yaxes(title_text="成交量", secondary_y=True, row=1, col=1, showgrid=False)
+
+    # MACD
+    fig.add_trace(go.Bar(x=df_clean.index, y=df_clean['MACD_Hist'], marker_color=np.where(df_clean['MACD_Hist'] >= 0, 'green', 'red'), name='MACD Hist'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Line'], line=dict(color='blue', width=1), name='MACD 線'), row=2, col=1)
     
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MACD_Signal'], line=dict(color='#ffab40', width=1), name='Signal 線'), row=2, col=1)
     fig.update_yaxes(title_text="MACD", row=2, col=1, fixedrange=True)
 
-
-    
+    # RSI & ADX
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['RSI'], line=dict(color='#0077b6', width=1.5), name='RSI'), row=3, col=1)
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['ADX'], line=dict(color='#800080', width=1.5, dash='dot'), name='ADX'), row=3, col=1) 
     fig.update_yaxes(range=[0, 100], row=3, col=1, fixedrange=True)
     fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1, opacity=0.5)
     fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1, opacity=0.5)
 
-    
+    # OBV
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['OBV'], line=dict(color='#1e8449', width=1.5), name='OBV'), row=4, col=1)
     fig.update_yaxes(title_text="OBV", row=4, col=1, fixedrange=True)
-
 
     fig.update_layout(
         title_text=f"AI 融合分析圖表", 
@@ -866,7 +705,7 @@ def main():
     
     current_category_options_display = list(CATEGORY_HOT_OPTIONS.get(selected_category_key, {}).keys())
     
-    current_symbol_code = st.session_state.get('last_search_symbol', "2330.TW - 台積電")
+    current_symbol_code = st.session_state.get('last_search_symbol', "2330.TW")
     default_symbol_index = 0
     
     try:
@@ -956,24 +795,24 @@ def main():
                     df = calculate_technical_indicators(df) 
                     fa_result = calculate_fundamental_rating(final_symbol_to_analyze)
                     
-            analysis = generate_expert_fusion_signal(
-                df, 
-                fa_rating=fa_result, 
-                is_long_term=is_long_term,
-                currency_symbol=currency_symbol 
-            )
+                    analysis = generate_expert_fusion_signal(
+                        df, 
+                        fa_rating=fa_result, 
+                        is_long_term=is_long_term,
+                        currency_symbol=currency_symbol 
+                    )
                     
-            st.session_state['analysis_results'] = {
-                    'df': df,
-                    'company_info': company_info,
-                    'currency_symbol': currency_symbol,
-                    'fa_result': fa_result,
-                    'analysis': analysis,
-                    'selected_period_key': selected_period_key,
-                    'final_symbol_to_analyze': final_symbol_to_analyze
-                }
+                    st.session_state['analysis_results'] = {
+                        'df': df,
+                        'company_info': company_info,
+                        'currency_symbol': currency_symbol,
+                        'fa_result': fa_result,
+                        'analysis': analysis,
+                        'selected_period_key': selected_period_key,
+                        'final_symbol_to_analyze': final_symbol_to_analyze
+                    }
                     
-            st.session_state['data_ready'] = True
+                    st.session_state['data_ready'] = True
 
         except Exception as e:
             st.error(f"❌ 分析 {final_symbol_to_analyze} 時發生未預期的錯誤: {str(e)}")
