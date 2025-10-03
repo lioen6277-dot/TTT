@@ -513,7 +513,7 @@ def calculate_volume_rating(df):
     return volume_score, signal_list
 
 
-def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$"):
+def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_symbol="$", long_term_ema_200=None, long_term_adx=None, latest_vix=None):
     """
     
     """
@@ -529,6 +529,15 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
     adx_value = last_row['ADX'] 
     
     expert_opinions = {}
+
+
+    ma_score = 0
+    volume_score = 0
+    momentum_score = 0 
+    strength_score = 0
+    kline_score = 0
+    mtf_score = 0
+    vix_score = 0
     
     
     ma_score = 0
@@ -658,93 +667,93 @@ def generate_expert_fusion_signal(df, fa_rating, is_long_term=True, currency_sym
 
     )
     
+
+ADX_TREND_THRESHOLD = 25
+BASE_ATR_MULTIPLIER = 2.0 
+
+if adx_value >= 40: # 超強趨勢，可使用更緊密止損
+    atr_multiplier = 1.0 
+    expert_opinions['風險專家 (ATR)'] = f"風險管理：**超強趨勢** (ADX >= 40)，使用 **1.0x ATR** 止損 (R:R 2:1)。"
+elif adx_value > ADX_TREND_THRESHOLD:
+    # 強趨勢時收緊止損
+    atr_multiplier = 1.5 
+    expert_opinions['風險專家 (ATR)'] = f"風險管理：**強趨勢** (ADX > 25)，使用 **1.5x ATR** 止損 (R:R 2:1)。"
+else:
+
+    atr_multiplier = BASE_ATR_MULTIPLIER 
+    expert_opinions['風險專家 (ATR)'] = f"風險管理：**弱勢/盤整** (ADX <= 25)，使用 **2.0x ATR** 止損 (R:R 2:1)。"
+
+risk_unit = atr_value * atr_multiplier 
+reward_unit = risk_unit * 2.0 # 固定 R:R 2:1
+
+
+MAX_SCORE = 18.25 
+confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
+
+action = "觀望 (Neutral)"
+if fusion_score >= 4.0: action = "強力買入 (Strong Buy)"
+elif fusion_score >= 1.0: action = "中性偏買 (Hold/Buy)"
+elif fusion_score <= -4.0: action = "強力賣出 (Strong Sell)"
+elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
+
+entry_buffer = atr_value * 0.3
+price_format = ".4f" if current_price < 100 and not currency_symbol == 'NT$' else ".2f"
+
+entry = current_price
+stop_loss = 0
+take_profit = 0
+strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
+
+if action in ["強力買入 (Strong Buy)", "中性偏買 (Hold/Buy)"]:
+    entry = current_price - entry_buffer # 建議尋找回調支撐
+    stop_loss = entry - risk_unit 
+    take_profit = entry + reward_unit 
+    strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找支撐或等待回調進場。"
     
-    ADX_TREND_THRESHOLD = 25
-    BASE_ATR_MULTIPLIER = 2.0 
-    
-    if adx_value >= 40: # 超強趨勢，可使用更緊密止損
-        atr_multiplier = 1.0 
-        expert_opinions['風險專家 (ATR)'] = f"風險管理：**超強趨勢** (ADX >= 40)，使用 **1.0x ATR** 止損 (R:R 2:1)。"
-    elif adx_value > ADX_TREND_THRESHOLD:
-        # 強趨勢時收緊止損
-        atr_multiplier = 1.5 
-        expert_opinions['風險專家 (ATR)'] = f"風險管理：**強趨勢** (ADX > 25)，使用 **1.5x ATR** 止損 (R:R 2:1)。"
-    else:
-    
-        atr_multiplier = BASE_ATR_MULTIPLIER 
-        expert_opinions['風險專家 (ATR)'] = f"風險管理：**弱勢/盤整** (ADX <= 25)，使用 **2.0x ATR** 止損 (R:R 2:1)。"
-    
-    risk_unit = atr_value * atr_multiplier 
-    reward_unit = risk_unit * 2.0 # 固定 R:R 2:1
-    
-    
-    MAX_SCORE = 18.25 
-    confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
-    
-    action = "觀望 (Neutral)"
-    if fusion_score >= 4.0: action = "強力買入 (Strong Buy)"
-    elif fusion_score >= 1.0: action = "中性偏買 (Hold/Buy)"
-    elif fusion_score <= -4.0: action = "強力賣出 (Strong Sell)"
-    elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
-    
-    entry_buffer = atr_value * 0.3
-    price_format = ".4f" if current_price < 100 and not currency_symbol == 'NT$' else ".2f"
-    
-    entry = current_price
-    stop_loss = 0
-    take_profit = 0
-    strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
-    
-    if action in ["強力買入 (Strong Buy)", "中性偏買 (Hold/Buy)"]:
-        entry = current_price - entry_buffer # 建議尋找回調支撐
-        stop_loss = entry - risk_unit 
-        take_profit = entry + reward_unit 
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找支撐或等待回調進場。"
-        
-    elif action in ["強力賣出 (Strong Sell)", "中性偏賣 (Hold/Sell)"]:
-        entry = current_price + entry_buffer # 建議尋找反彈阻力
-        stop_loss = entry + risk_unit 
-        take_profit = entry - reward_unit 
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找阻力或等待反彈後進場。"
-    
-    
-    mtf_opinion = expert_opinions.get('多時間框架 (MTF)', 'MTF 濾鏡數據缺失。')
-    vix_opinion = expert_opinions.get('情緒專家 (VIX)', '情緒指標數據缺失。')
-    volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
-    
-    total_signal_list = [
-        "--- 評分細項 (Score Breakdown) ---", 
-        f"趨勢均線評分 (MA): {ma_score:.1f} / 3.5",
-        f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
-        f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
-        f"K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5", 
-        f"**多時間框架濾鏡 (MTF): {mtf_score:.2f} / 3.0 ({mtf_opinion.split('：')[-1].strip()})**", # <--- 新增
-        f"**情緒評分 (VIX): {vix_score:.1f} / 1.0 ({vix_opinion.split('：')[-1].strip()})**",      # <--- 新增
-        "--- 基本面與籌碼面 ---",
-        f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_rating.get('Message', '數據缺失')})",
-        f"籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_opinion.split('：')[-1].strip()})",
-        f"風險單位 (Risk Unit): {currency_symbol}{risk_unit:{price_format}} ({atr_multiplier:.1f}x ATR)" # <--- 新增風險單位顯示
-    ]
-    
-    def format_price(p):
-        if p is None or p == 0:
-            return 0
-        return round(p, 4) if current_price < 100 else round(p, 2)
-    
-    return {
-        'action': action,
-        'score': fusion_score,
-        'confidence': confidence,
-        'strategy': strategy_desc,
-        'entry_price': format_price(entry),
-        'take_profit': format_price(take_profit),
-        'stop_loss': format_price(stop_loss),
-        'current_price': format_price(current_price),
-        'expert_opinions': expert_opinions,
-        'atr': format_price(atr_value),
-        'signal_list': total_signal_list,
-        'currency_symbol': currency_symbol
-    }
+elif action in ["強力賣出 (Strong Sell)", "中性偏賣 (Hold/Sell)"]:
+    entry = current_price + entry_buffer # 建議尋找反彈阻力
+    stop_loss = entry + risk_unit 
+    take_profit = entry - reward_unit 
+    strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format}}** 範圍內尋找阻力或等待反彈後進場。"
+
+
+mtf_opinion = expert_opinions.get('多時間框架 (MTF)', 'MTF 濾鏡數據缺失。')
+vix_opinion = expert_opinions.get('情緒專家 (VIX)', '情緒指標數據缺失。')
+volume_opinion = expert_opinions.get('籌碼專家 (OBV)', '籌碼面數據缺失。')
+
+total_signal_list = [
+    "--- 評分細項 (Score Breakdown) ---", 
+    f"趨勢均線評分 (MA): {ma_score:.1f} / 3.5",
+    f"動能評分 (RSI): {momentum_score:.1f} / 2.0", 
+    f"強度評分 (MACD+ADX): {strength_score:.2f} / 2.25", 
+    f"K線形態評分 (HA K-Line): {kline_score:.1f} / 1.5", 
+    f"**多時間框架濾鏡 (MTF): {mtf_score:.2f} / 3.0 ({mtf_opinion.split('：')[-1].strip()})**", # <--- 新增
+    f"**情緒評分 (VIX): {vix_score:.1f} / 1.0 ({vix_opinion.split('：')[-1].strip()})**",      # <--- 新增
+    "--- 基本面與籌碼面 ---",
+    f"基本面評分 (FA Score): {fa_rating['Combined_Rating']:.1f} / 9.0 ({fa_rating.get('Message', '數據缺失')})",
+    f"籌碼面評分 (Volume Score): {volume_score:.1f} / 2.0 ({volume_opinion.split('：')[-1].strip()})",
+    f"風險單位 (Risk Unit): {currency_symbol}{risk_unit:{price_format}} ({atr_multiplier:.1f}x ATR)" # <--- 新增風險單位顯示
+]
+
+def format_price(p):
+    if p is None or p == 0:
+        return 0
+    return round(p, 4) if current_price < 100 else round(p, 2)
+
+return {
+    'action': action,
+    'score': fusion_score,
+    'confidence': confidence,
+    'strategy': strategy_desc,
+    'entry_price': format_price(entry),
+    'take_profit': format_price(take_profit),
+    'stop_loss': format_price(stop_loss),
+    'current_price': format_price(current_price),
+    'expert_opinions': expert_opinions,
+    'atr': format_price(atr_value),
+    'signal_list': total_signal_list,
+    'currency_symbol': currency_symbol
+}
 
 def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna().copy()
@@ -1217,4 +1226,3 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
-
