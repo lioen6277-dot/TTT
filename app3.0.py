@@ -12,9 +12,7 @@ from datetime import datetime, timedelta
 
 warnings.filterwarnings('ignore')
 
-# ==============================================================================
-# 1. 頁面配置與全局設定
-# ==============================================================================
+
 
 st.set_page_config(
     page_title="AI趨勢分析📈", 
@@ -22,7 +20,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# 週期映射：(YFinance Period, YFinance Interval)
 PERIOD_MAP = { 
     "30 分": ("60d", "30m"), 
     "4 小時": ("1y", "60m"), 
@@ -30,33 +27,103 @@ PERIOD_MAP = {
     "1 週": ("max", "1wk")
 }
 
-# 🚀 您的【所有資產清單】
 FULL_SYMBOLS_MAP = {
-    # ----------------------------------------------------
-    # A. 美股核心 (US Stocks) - 個股
-    # ----------------------------------------------------
     "TSLA": {"name": "特斯拉", "keywords": ["特斯拉", "電動車", "TSLA", "Tesla"]},
     "NVDA": {"name": "輝達", "keywords": ["輝達", "英偉達", "AI", "NVDA", "Nvidia"]},
     "AAPL": {"name": "蘋果", "keywords": ["蘋果", "Apple", "AAPL"]},
     "GOOGL": {"name": "谷歌/Alphabet", "keywords": ["谷歌", "Alphabet", "GOOGL", "GOOG"]},
     "MSFT": {"name": "微軟", "keywords": ["微軟", "Microsoft", "MSFT"]},
     "AMZN": {"name": "亞馬遜", "keywords": ["亞馬遜", "Amazon", "AMZN"]},
-    
-    # ----------------------------------------------------
-    # B. 台股核心 (TW Stocks) - 個股
-    # ----------------------------------------------------
-    "2330.TW": {"name": "台積電", "keywords": ["台積電", "2330.TW", "TSMC"]},
-    "2303.TW": {"name": "聯電", "keywords": ["聯電", "2303.TW"]},
-    "0050.TW": {"name": "元大台灣50", "keywords": ["0050", "台灣50", "ETF"]},
-    
-    # ----------------------------------------------------
-    # C. 加密貨幣核心 (Crypto) - 對
-    # ----------------------------------------------------
-    "BTC-USD": {"name": "比特幣/美元", "keywords": ["比特幣", "BTC-USD", "Bitcoin"]},
-    "ETH-USD": {"name": "以太坊/美元", "keywords": ["以太坊", "ETH-USD", "Ethereum"]},
-    "BNB-USD": {"name": "幣安幣/美元", "keywords": ["幣安幣", "BNB-USD"]},
+    "META": {"name": "Meta/臉書", "keywords": ["臉書", "Meta", "FB", "META"]},
+    "NFLX": {"name": "網飛", "keywords": ["網飛", "Netflix", "NFLX"]},
+    "ADBE": {"name": "Adobe", "keywords": ["Adobe", "ADBE"]},
+    "CRM": {"name": "Salesforce", "keywords": ["Salesforce", "CRM"]},
+    "ORCL": {"name": "甲骨文", "keywords": ["甲骨文", "Oracle", "ORCL"]},
+    "COST": {"name": "好市多", "keywords": ["好市多", "Costco", "COST"]},
+    "JPM": {"name": "摩根大通", "keywords": ["摩根大通", "JPMorgan", "JPM"]},
+    "V": {"name": "Visa", "keywords": ["Visa", "V"]},
+    "WMT": {"name": "沃爾瑪", "keywords": ["沃爾瑪", "Walmart", "WMT"]},
+    "PG": {"name": "寶潔", "keywords": ["寶潔", "P&G", "PG"]},
+    "KO": {"name": "可口可樂", "keywords": ["可口可樂", "CocaCola", "KO"]},
+    "PEP": {"name": "百事", "keywords": ["百事", "Pepsi", "PEP"]},
+    "MCD": {"name": "麥當勞", "keywords": ["麥當勞", "McDonalds", "MCD"]},
+    "QCOM": {"name": "高通", "keywords": ["高通", "Qualcomm", "QCOM"]},
+    "INTC": {"name": "英特爾", "keywords": ["英特爾", "Intel", "INTC"]},
+    "AMD": {"name": "超微", "keywords": ["超微", "AMD"]},
+    "LLY": {"name": "禮來", "keywords": ["禮來", "EliLilly", "LLY"]},
+    "UNH": {"name": "聯合健康", "keywords": ["聯合健康", "UNH"]},
+    "HD": {"name": "家得寶", "keywords": ["家得寶", "HomeDepot", "HD"]},
+    "CAT": {"name": "開拓重工", "keywords": ["開拓重工", "Caterpillar", "CAT"]},
+    "^GSPC": {"name": "S&P 500 指數", "keywords": ["標普", "S&P500", "^GSPC", "SPX"]},
+    "^IXIC": {"name": "NASDAQ 綜合指數", "keywords": ["納斯達克", "NASDAQ", "^IXIC"]},
+    "^DJI": {"name": "道瓊工業指數", "keywords": ["道瓊", "DowJones", "^DJI"]},
+    "SPY": {"name": "SPDR 標普500 ETF", "keywords": ["SPY", "標普ETF"]},
+    "QQQ": {"name": "Invesco QQQ Trust", "keywords": ["QQQ", "納斯達克ETF"]},
+    "VOO": {"name": "Vanguard 標普500 ETF", "keywords": ["VOO", "Vanguard"]},
+    "2330.TW": {"name": "台積電", "keywords": ["台積電", "2330", "TSMC"]},
+    "2317.TW": {"name": "鴻海", "keywords": ["鴻海", "2317", "Foxconn"]},
+    "2454.TW": {"name": "聯發科", "keywords": ["聯發科", "2454", "MediaTek"]},
+    "2308.TW": {"name": "台達電", "keywords": ["台達電", "2308", "Delta"]},
+    "3017.TW": {"name": "奇鋐", "keywords": ["奇鋐", "3017", "散熱"]},
+    "3231.TW": {"name": "緯創", "keywords": ["緯創", "3231"]},
+    "2382.TW": {"name": "廣達", "keywords": ["廣達", "2382"]},
+    "2379.TW": {"name": "瑞昱", "keywords": ["瑞昱", "2379"]},
+    "2881.TW": {"name": "富邦金", "keywords": ["富邦金", "2881"]},
+    "2882.TW": {"name": "國泰金", "keywords": ["國泰金", "2882"]},
+    "2603.TW": {"name": "長榮", "keywords": ["長榮", "2603", "航運"]},
+    "2609.TW": {"name": "陽明", "keywords": ["陽明", "2609", "航運"]},
+    "2615.TW": {"name": "萬海", "keywords": ["萬海", "2615", "航運"]},
+    "2891.TW": {"name": "中信金", "keywords": ["中信金", "2891"]},
+    "1101.TW": {"name": "台泥", "keywords": ["台泥", "1101"]},
+    "1301.TW": {"name": "台塑", "keywords": ["台塑", "1301"]},
+    "2357.TW": {"name": "華碩", "keywords": ["華碩", "2357"]},
+    "0050.TW": {"name": "元大台灣50", "keywords": ["台灣50", "0050", "台灣五十"]},
+    "0056.TW": {"name": "元大高股息", "keywords": ["高股息", "0056"]},
+    "00878.TW": {"name": "國泰永續高股息", "keywords": ["00878", "國泰永續"]},
+    "^TWII": {"name": "台股指數", "keywords": ["台股指數", "加權指數", "^TWII"]},
+    "BTC-USD": {"name": "比特幣", "keywords": ["比特幣", "BTC", "bitcoin", "BTC-USDT"]},
+    "ETH-USD": {"name": "以太坊", "keywords": ["以太坊", "ETH", "ethereum", "ETH-USDT"]},
+    "SOL-USD": {"name": "Solana", "keywords": ["Solana", "SOL", "SOL-USDT"]},
+    "BNB-USD": {"name": "幣安幣", "keywords": ["幣安幣", "BNB", "BNB-USDT"]},
+    "DOGE-USD": {"name": "狗狗幣", "keywords": ["狗狗幣", "DOGE", "DOGE-USDT"]},
+    "XRP-USD": {"name": "瑞波幣", "keywords": ["瑞波幣", "XRP", "XRP-USDT"]},
+    "ADA-USD": {"name": "Cardano", "keywords": ["Cardano", "ADA", "ADA-USDT"]},
+    "AVAX-USD": {"name": "Avalanche", "keywords": ["Avalanche", "AVAX", "AVAX-USDT"]},
+    "DOT-USD": {"name": "Polkadot", "keywords": ["Polkadot", "DOT", "DOT-USDT"]},
+    "LINK-USD": {"name": "Chainlink", "keywords": ["Chainlink", "LINK", "LINK-USDT"]},
 }
 
+CATEGORY_MAP = {
+    "美股 (US) - 個股/ETF/指數": [c for c in FULL_SYMBOLS_MAP.keys() if not (c.endswith(".TW") or c.endswith("-USD") or c.startswith("^TWII"))],
+    "台股 (TW) - 個股/ETF/指數": [c for c in FULL_SYMBOLS_MAP.keys() if c.endswith(".TW") or c.startswith("^TWII")],
+    "加密貨幣 (Crypto)": [c for c in FULL_SYMBOLS_MAP.keys() if c.endswith("-USD")],
+}
+
+CATEGORY_HOT_OPTIONS = {}
+for category, codes in CATEGORY_MAP.items():
+    options = {}
+    sorted_codes = sorted(codes) 
+    for code in sorted_codes:
+        info = FULL_SYMBOLS_MAP.get(code)
+        if info:
+            options[f"{code} - {info['name']}"] = code
+    CATEGORY_HOT_OPTIONS[category] = options
+
+
+def get_symbol_from_query(query: str) -> str:
+    """ 🎯  """
+    query = query.strip()
+    query_upper = query.upper()
+    for code, data in FULL_SYMBOLS_MAP.items():
+        if query_upper == code: return code
+        if any(query_upper == kw.upper() for kw in data["keywords"]): return code 
+    for code, data in FULL_SYMBOLS_MAP.items():
+        if query == data["name"]: return code
+    if re.fullmatch(r'\d{4,6}', query) and not any(ext in query_upper for ext in ['.TW', '.HK', '.SS', '-USD']):
+        tw_code = f"{query}.TW"
+        if tw_code in FULL_SYMBOLS_MAP: return tw_code
+        return tw_code
+    return query
 
 # ==============================================================================
 # 2. 數據獲取與指標計算函數
@@ -755,3 +822,4 @@ if __name__ == '__main__':
         st.session_state['data_ready_df'] = pd.DataFrame()
         
     main()
+
