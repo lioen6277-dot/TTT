@@ -11,6 +11,9 @@ import re
 from datetime import datetime, timedelta
 import requests  # For news API
 from scipy.stats import linregress
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import json
 
 warnings.filterwarnings('ignore')
 
@@ -20,9 +23,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# Replace with actual API keys
-NEWS_API_KEY = "your_news_api_key_here"  # From newsapi.org
-ALPHA_VANTAGE_API_KEY = "your_alpha_vantage_key_here"  # For better data
+# Sensitive keys from secrets
+try:
+    NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+    ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
+except KeyError:
+    NEWS_API_KEY = "your_news_api_key_here"  # Fallback
+    ALPHA_VANTAGE_API_KEY = "your_alpha_vantage_key_here"  # Fallback
 
 PERIOD_MAP = { 
     "30 分": ("60d", "30m"), 
@@ -31,7 +38,9 @@ PERIOD_MAP = {
     "1 週": ("max", "1wk")
 }
 
-FULL_SYMBOLS_MAP = {
+# Load FULL_SYMBOLS_MAP from JSON string or file (for maintainability)
+FULL_SYMBOLS_MAP_JSON = '''
+{
     "TSLA": {"name": "特斯拉", "keywords": ["特斯拉", "電動車", "TSLA", "Tesla"]},
     "NVDA": {"name": "輝達", "keywords": ["輝達", "英偉達", "AI", "NVDA", "Nvidia"]},
     "AAPL": {"name": "蘋果", "keywords": ["蘋果", "Apple", "AAPL"]},
@@ -95,8 +104,10 @@ FULL_SYMBOLS_MAP = {
     "AVAX-USD": {"name": "Avalanche", "keywords": ["Avalanche", "AVAX", "AVAX-USDT"]},
     "DOT-USD": {"name": "Polkadot", "keywords": ["Polkadot", "DOT", "DOT-USDT"]},
     "LINK-USD": {"name": "Chainlink", "keywords": ["Chainlink", "LINK", "LINK-USDT"]},
-    "ASTER-USD": {"name": "Aster", "keywords": ["Aster", "ASTER-USD"]},
+    "ASTER-USD": {"name": "Aster", "keywords": ["Aster", "ASTER-USD"]}
 }
+'''
+FULL_SYMBOLS_MAP = json.loads(FULL_SYMBOLS_MAP_JSON)
 
 CATEGORY_MAP = {
     "美股 (US) - 個股/ETF/指數": [c for c in FULL_SYMBOLS_MAP.keys() if not (c.endswith(".TW") or c.endswith("-USD") or c.startswith("^TWII"))],
@@ -138,13 +149,20 @@ def get_ttl(interval):
 
 @st.cache_data(ttl=get_ttl, show_spinner="正在從 Alpha Vantage 獲取數據...") 
 def get_stock_data(symbol, period, interval):
+    session = requests.Session()
+    retry = Retry(connect=3, backoff_factor=0.5)
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    
     try:
         # Use Alpha Vantage for more reliable data
         url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval={interval}&apikey={ALPHA_VANTAGE_API_KEY}"
-        response = requests.get(url)
+        response = session.get(url)
         data = response.json()
         
-        if "Time Series" not in data: return pd.DataFrame()
+        if "Time Series" not in data: 
+            raise ValueError("No data from Alpha Vantage")
         
         df = pd.DataFrame.from_dict(data["Time Series (Intraday)"], orient="index")
         df = df.astype(float)
@@ -152,12 +170,22 @@ def get_stock_data(symbol, period, interval):
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
         
+        # Data validation
+        if df.empty or df.isnull().values.any():
+            raise ValueError("Invalid or missing data")
+        
         return df
     except Exception as e:
         # Fallback to yfinance
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval)
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        
+        # Validation
+        if df.empty or df.isnull().values.any():
+            st.error(f"Data validation failed: {str(e)}")
+            return pd.DataFrame()
+        
         return df
 
 @st.cache_data(ttl=3600)
@@ -210,13 +238,12 @@ def get_chip_data(stock_id):
     # Placeholder default value since FinMind not available
     return 0.0
 
-def calculate_dcf(ticker):
+def calculate_dcf(ticker, growth_rate=None, discount_rate=0.1):
     try:
         info = ticker.info
         financials = ticker.financials
         fcf = financials.loc['Free Cash Flow'].dropna().iloc[-1] if 'Free Cash Flow' in financials.index else info.get('freeCashflow', 0)
-        growth_rate = info.get('earningsGrowth', 0.05)
-        discount_rate = 0.1
+        growth_rate = growth_rate or info.get('earningsGrowth', 0.05)
         perpetuity_growth = 0.025
         projected_fcf = [fcf * (1 + growth_rate) ** i for i in range(1, 6)]
         pv_fcf = [cf / (1 + discount_rate) ** i for i, cf in enumerate(projected_fcf, 1)]
@@ -262,18 +289,19 @@ def calculate_fundamental_rating(ticker):
             rating += 20
             message.append(f"淨利率 {net_margin:.2%} >30% 強獲利")
         
-        # CAGR
+        # CAGR with historical data
         if len(financials.columns) >= 5:
             rev_recent = financials.loc['Total Revenue'].iloc[0]
-            rev_old = financials.loc['Total Revenue'].iloc[4]
-            rev_cagr = (rev_recent / rev_old) ** (0.25) - 1 if rev_old != 0 else 0
+            rev_old = financials.loc['Total Revenue'].iloc[-1]  # Oldest
+            years = len(financials.columns) - 1
+            rev_cagr = (rev_recent / rev_old) ** (1/years) - 1 if rev_old != 0 else 0
             if rev_cagr > 0.1:
                 rating += 10
                 message.append(f"營收CAGR {rev_cagr:.2%} >10% 穩定成長")
             
             earn_recent = financials.loc['Net Income'].iloc[0]
-            earn_old = financials.loc['Net Income'].iloc[4]
-            earn_cagr = (earn_recent / earn_old) ** (0.25) - 1 if earn_old != 0 else 0
+            earn_old = financials.loc['Net Income'].iloc[-1]
+            earn_cagr = (earn_recent / earn_old) ** (1/years) - 1 if earn_old != 0 else 0
             if earn_cagr > 0.1:
                 rating += 10
                 message.append(f"利潤CAGR {earn_cagr:.2%} >10% 穩定成長")
@@ -287,6 +315,18 @@ def calculate_fundamental_rating(ticker):
         return {'rating': rating, 'Message': '; '.join(message)}
     except:
         return {'rating': 0, 'Message': '基本面數據不足'}
+
+def simple_sentiment_analysis(texts):
+    # Simple keyword-based sentiment (since no VADER)
+    positive = sum(1 for t in texts if any(word in t.lower() for word in ['good', 'positive', 'growth', 'buy']))
+    negative = sum(1 for t in texts if any(word in t.lower() for word in ['bad', 'negative', 'decline', 'sell']))
+    return (positive - negative) / max(len(texts), 1)
+
+def detect_support_resistance(df):
+    # Simple min/max for support/resistance
+    support = df['Low'].min()
+    resistance = df['High'].max()
+    return support, resistance
 
 def generate_expert_fusion_signal(df, symbol):
     # Technical opinions
@@ -333,9 +373,17 @@ def generate_expert_fusion_signal(df, symbol):
     if adx > 25:
         expert_opinions['ADX'] = 'ADX >25 確認強趨勢'
     
-    ta_positive = sum(1 for v in expert_opinions.values() if '多頭' in v or '買入' in v)
-    ta_negative = sum(1 for v in expert_opinions.values() if '空頭' in v or '賣出' in v)
-    ta_score = (ta_positive - ta_negative) / max(len(expert_opinions), 1) * 100
+    # Support/Resistance
+    support, resistance = detect_support_resistance(df)
+    current = df['Close'].iloc[-1]
+    if current < support * 1.05:
+        expert_opinions['支撐/阻力'] = '接近支撐，潛在買入'
+    elif current > resistance * 0.95:
+        expert_opinions['支撐/阻力'] = '接近阻力，潛在賣出'
+    
+    # Weights for fusion
+    weights = {'移動平均線 (MA)': 0.2, '相對強弱指數 (RSI)': 0.15, 'MACD': 0.15, '成交量': 0.1, 'ADX': 0.1, '支撐/阻力': 0.1}
+    ta_score = sum(weights.get(k, 0.1) * (1 if '多頭' in v or '買入' in v else -1 if '空頭' in v or '賣出' in v else 0) for k, v in expert_opinions.items()) * 100
     
     # Fundamental
     ticker = yf.Ticker(symbol)
@@ -345,7 +393,8 @@ def generate_expert_fusion_signal(df, symbol):
     
     # Message face
     news = get_news(symbol)
-    expert_opinions['消息面'] = ' '.join(news) if news else '無消息'
+    sentiment = simple_sentiment_analysis(news)
+    expert_opinions['消息面'] = '情緒分數 ' + str(sentiment) + '; ' + ' '.join(news) if news else '無消息'
     
     # Macro
     rate = get_fed_rate()
@@ -358,12 +407,16 @@ def generate_expert_fusion_signal(df, symbol):
     
     # VIX for sentiment
     vix = get_vix()
-    expert_opinions['情緒指標'] = f'VIX {vix:.2f} ' + ('>30 恐慌，低估機會' if vix > 30 else '<30 穩定')
+    vix_hist = yf.Ticker("^VIX").history(period="1y")['Close']
+    percentile = np.percentile(vix_hist, np.where(vix_hist <= vix)[0].size / len(vix_hist) * 100)
+    expert_opinions['情緒指標'] = f'VIX {vix:.2f} (歷史百分位 {percentile:.2f}%) ' + ('>30 恐慌，低估機會' if vix > 30 else '<30 穩定')
     
     # Dynamic weight
     w_fa = 0.7 if vix > 30 else 0.4
-    w_ta = 1 - w_fa
-    fusion_score = w_fa * fa_score + w_ta * ta_score
+    w_ta = 0.3
+    w_msg = 0.2
+    w_macro = 0.1
+    fusion_score = w_fa * fa_score + w_ta * ta_score + w_msg * (sentiment * 100) + w_macro * (50 if '利多' in expert_opinions.get('宏觀事件', '') else -50 if '利空' in expert_opinions.get('宏觀事件', '') else 0)
     
     action = '買進' if fusion_score > 50 else '賣出' if fusion_score < -50 else '觀望'
     
@@ -434,7 +487,7 @@ def create_comprehensive_chart(df, symbol, period_key):
     fig.update_layout(title=f"{symbol} 技術圖表 ({period_key})", height=800)
     return fig
 
-def run_backtest(df, symbol):
+def run_backtest(df, symbol, sl_pct=0.05, tp_pct=0.1):
     # Generate signals using TA (as placeholder for historical fusion, since FA is static)
     df['ema10'] = ta.trend.ema_indicator(df['Close'], window=10)
     df['ema50'] = ta.trend.ema_indicator(df['Close'], window=50)
@@ -444,9 +497,45 @@ def run_backtest(df, symbol):
     strategy_returns = returns * df['signal'].shift()
     strategy_returns = strategy_returns.dropna()
     
-    cum_ret = (1 + strategy_returns).cumprod() * 100000
+    # Simulate trades with SL/TP
+    position = 0
+    entry = 0
+    trades = []
+    for i in range(1, len(df)):
+        if df['signal'].iloc[i] != position:
+            if position != 0:  # Close previous
+                exit_price = df['Close'].iloc[i]
+                ret = (exit_price - entry) / entry * position  # position 1 long, -1 short
+                trades.append(ret)
+            if df['signal'].iloc[i] != 0:
+                entry = df['Close'].iloc[i]
+            position = df['signal'].iloc[i]
+        
+        # Check SL/TP
+        if position != 0:
+            current = df['Close'].iloc[i]
+            if position > 0:
+                if current <= entry * (1 - sl_pct):
+                    ret = -sl_pct
+                    trades.append(ret)
+                    position = 0
+                elif current >= entry * (1 + tp_pct):
+                    ret = tp_pct
+                    trades.append(ret)
+                    position = 0
+            else:
+                if current >= entry * (1 + sl_pct):
+                    ret = -sl_pct
+                    trades.append(ret)
+                    position = 0
+                elif current <= entry * (1 - tp_pct):
+                    ret = tp_pct
+                    trades.append(ret)
+                    position = 0
+    
+    cum_ret = (1 + pd.Series(trades)).cumprod() * 100000 if trades else pd.Series([100000])
     total_return = (cum_ret.iloc[-1] / 100000 - 1) * 100
-    win_rate = (strategy_returns > 0).mean() * 100
+    win_rate = (pd.Series(trades) > 0).mean() * 100 if trades else 0
     
     # Max drawdown
     peak = cum_ret.cummax()
@@ -454,23 +543,34 @@ def run_backtest(df, symbol):
     max_drawdown = drawdown.min() * 100
     
     # Sharpe
-    sharpe_ratio = (strategy_returns.mean() / strategy_returns.std()) * np.sqrt(252) if strategy_returns.std() != 0 else 0
+    strategy_returns = pd.Series(trades)
+    sharpe_ratio = (strategy_returns.mean() / strategy_returns.std()) * np.sqrt(252 / len(df)) if strategy_returns.std() != 0 else 0
+    
+    # Sortino (downside risk)
+    downside = strategy_returns[strategy_returns < 0].std()
+    sortino = (strategy_returns.mean() / downside) * np.sqrt(252 / len(df)) if downside != 0 else 0
+    
+    # Calmar
+    calmar = total_return / -max_drawdown if max_drawdown != 0 else 0
     
     # Alpha Beta
     bench_symbol = '^TWII' if symbol.endswith('.TW') else '^GSPC'
     bench_df = yf.download(bench_symbol, start=df.index.min(), end=df.index.max())['Close']
-    bench_returns = bench_df.pct_change().reindex(strategy_returns.index).fillna(0)
-    result = linregress(bench_returns, strategy_returns)
+    bench_returns = bench_df.pct_change().reindex(df.index).fillna(0)
+    bench_returns = bench_returns.iloc[1:]  # Align
+    result = linregress(bench_returns, returns.iloc[1:])
     beta = result.slope
     alpha = result.intercept * 252  # Annualized
     
-    total_trades = df['signal'].diff().abs().sum() / 2
+    total_trades = len(trades)
     
     return {
         'total_return': total_return,
         'win_rate': win_rate,
         'max_drawdown': max_drawdown,
         'sharpe_ratio': sharpe_ratio,
+        'sortino_ratio': sortino,
+        'calmar_ratio': calmar,
         'total_trades': total_trades,
         'alpha': alpha,
         'beta': beta,
@@ -601,7 +701,7 @@ def main():
             
             if backtest_results.get("total_trades", 0) > 0:
                 
-                col_bt_1, col_bt_2, col_bt_3, col_bt_4, col_bt_5, col_bt_6, col_bt_7 = st.columns(7)
+                col_bt_1, col_bt_2, col_bt_3, col_bt_4, col_bt_5, col_bt_6, col_bt_7, col_bt_8, col_bt_9 = st.columns(9)
                 
                 with col_bt_1: 
                     st.metric("📊 總回報率", f"{backtest_results['total_return']:.2f}%", 
@@ -621,9 +721,15 @@ def main():
                     st.metric("📐 夏普比率", f"{backtest_results['sharpe_ratio']:.2f}")
                 
                 with col_bt_6:
-                    st.metric("Alpha", f"{backtest_results['alpha']:.4f}")
+                    st.metric("Sortino Ratio", f"{backtest_results['sortino_ratio']:.2f}")
                 
                 with col_bt_7:
+                    st.metric("Calmar Ratio", f"{backtest_results['calmar_ratio']:.2f}")
+                
+                with col_bt_8:
+                    st.metric("Alpha", f"{backtest_results['alpha']:.4f}")
+                
+                with col_bt_9:
                     st.metric("Beta", f"{backtest_results['beta']:.2f}")
                     
                 
