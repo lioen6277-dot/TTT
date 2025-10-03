@@ -10,8 +10,6 @@ import time
 import re
 from datetime import datetime, timedelta
 import requests  # For news API
-from fredapi import Fred  # For macro data
-from FinMind.data import DataLoader  # For Taiwan chip data
 from scipy.stats import linregress
 
 warnings.filterwarnings('ignore')
@@ -25,7 +23,6 @@ st.set_page_config(
 # Replace with actual API keys
 NEWS_API_KEY = "your_news_api_key_here"  # From newsapi.org
 ALPHA_VANTAGE_API_KEY = "your_alpha_vantage_key_here"  # For better data
-FRED_API_KEY = "your_fred_api_key_here"  # From FRED API
 
 PERIOD_MAP = { 
     "30 分": ("60d", "30m"), 
@@ -206,23 +203,12 @@ def get_news(symbol):
         return ["No news available"]
 
 def get_fed_rate():
-    try:
-        fred = Fred(api_key=FRED_API_KEY)
-        rate = fred.get_series_latest_release('FEDFUNDS')
-        return rate.iloc[-1]
-    except:
-        return 5.0  # Default if API fails
+    # Placeholder default value since FRED API not available
+    return 5.0
 
 def get_chip_data(stock_id):
-    try:
-        dl = DataLoader()
-        chip = dl.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=str(datetime.now() - timedelta(days=30)), end_date=str(datetime.now()))
-        foreign_buy = chip[chip['name'] == 'Foreign_Investor']['buy'].sum()
-        foreign_sell = chip[chip['name'] == 'Foreign_Investor']['sell'].sum()
-        net_buy = (foreign_buy - foreign_sell) / chip['volume'].sum() * 100
-        return net_buy
-    except:
-        return 0.0  # Default if fails
+    # Placeholder default value since FinMind not available
+    return 0.0
 
 def calculate_dcf(ticker):
     try:
@@ -255,7 +241,8 @@ def calculate_fundamental_rating(ticker):
             rating += 20
             message.append(f"ROE {roe:.2%} >15% 高效")
         
-        roce = info.get('returnOnCapitalEmployed', 0)  # May need calculation if not available
+        # ROCE approximation if not direct
+        roce = (info.get('operatingCashflow', 0) - info.get('capitalExpenditures', 0)) / (info.get('totalAssets', 1) - info.get('totalCurrentLiabilities', 0)) if 'operatingCashflow' in info else 0
         if roce > 0.1:
             rating += 20
             message.append(f"ROCE {roce:.2%} >10% 良好")
@@ -727,4 +714,3 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Alpha Vantage, Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
-
