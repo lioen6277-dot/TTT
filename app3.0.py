@@ -9,9 +9,6 @@ import warnings
 import time
 import re 
 from datetime import datetime, timedelta
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
 import requests  # For news API
 
 warnings.filterwarnings('ignore')
@@ -531,14 +528,6 @@ def fetch_chip_data(symbol):
     foreign_hold = holders.get('% Out', pd.Series([0])).iloc[0] if holders is not None else 0
     
     return {"foreign_hold": foreign_hold}
-
-def train_ml_model(features, target):
-    X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2)
-    model = RandomForestRegressor()
-    model.fit(X_train, y_train)
-    pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, pred)
-    return model, mse
 
 def generate_expert_fusion_signal(df, fa_rating, is_long_term, currency_symbol, symbol):
     if df.empty:
