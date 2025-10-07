@@ -220,10 +220,7 @@ def calculate_technical_indicators(df):
     return df
 
 def get_technical_data_df(df):
-    """
-    獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。
-    **🚀 優化：增加了所有指標的量化評分 (Technical_Signal_Score)。**
-    """
+    """獲取最新的技術指標數據和AI結論，並根據您的進階原則進行判讀。"""
     
     if df.empty or len(df) < 200: return pd.DataFrame()
 
@@ -231,7 +228,6 @@ def get_technical_data_df(df):
     if df_clean.empty: return pd.DataFrame()
 
     last_row = df_clean.iloc[-1]
-    # 使用 .get 避免在數據不足時出錯，但 MACD_Hist 應始終存在於 calculate_technical_indicators 之後
     prev_row = df_clean.iloc[-2] if len(df_clean) >= 2 else last_row 
 
     indicators = {}
@@ -243,18 +239,10 @@ def get_technical_data_df(df):
     indicators['ATR (9) 波動性'] = last_row['ATR']
     indicators['布林通道 (BB: 20/2)'] = last_row['Close']
     
-    # ⭐️ 新增：OBV 趨勢的評分 (OBV_Slope已計算)
-    indicators['OBV 趨勢'] = last_row['OBV_Slope']
-
-    # 🚀 核心新增：總量化評分機制初始化
-    technical_score = 0
-    WEIGHT_PER_INDICATOR = 1.0 # 設定每個指標的基礎權重 
-    
     data = []
     
     for name, value in indicators.items():
         conclusion, color = "", "grey"
-        score_change = 0 # 每個迴圈開始時重設分數變動
         
         if 'EMA 10/50/200' in name:
             ema_10 = last_row['EMA_10']
@@ -264,79 +252,51 @@ def get_technical_data_df(df):
             
             if ema_10 > ema_50 and ema_50 > ema_200:
                 conclusion, color = f"**強多頭：MA 多頭排列** (10>50>200)", "red"
-                score_change = +2.0 * WEIGHT_PER_INDICATOR
             elif ema_10 < ema_50 and ema_50 < ema_200:
                 conclusion, color = f"**強空頭：MA 空頭排列** (10<50<200)", "green"
-                score_change = -2.0 * WEIGHT_PER_INDICATOR
             elif last_row['Close'] > ema_50 and last_row['Close'] > ema_200:
                 conclusion, color = f"中長線偏多：價格站上 EMA 50/200", "orange"
-                score_change = +1.0 * WEIGHT_PER_INDICATOR
             else:
                 conclusion, color = "中性：MA 糾結或趨勢發展中", "blue"
-                score_change = 0
         
         elif 'RSI' in name:
             
             if value > 70:
                 conclusion, color = "警告：超買區域 (70)，潛在回調", "green" 
-                score_change = -0.5 * WEIGHT_PER_INDICATOR 
             elif value < 30:
                 conclusion, color = "強化：超賣區域 (30)，潛在反彈", "red"
-                score_change = +0.5 * WEIGHT_PER_INDICATOR
             elif value > 50:
                 conclusion, color = "多頭：RSI > 50，位於強勢區間", "red"
-                score_change = +1.0 * WEIGHT_PER_INDICATOR
             else:
                 conclusion, color = "空頭：RSI < 50，位於弱勢區間", "green"
-                score_change = -1.0 * WEIGHT_PER_INDICATOR
+
 
         elif 'MACD' in name:
-            # value is MACD_Hist
+            
             if value > 0 and value > prev_row['MACD_Hist']:
                 conclusion, color = "強化：多頭動能增強 (紅柱放大)", "red"
-                score_change = +1.0 * WEIGHT_PER_INDICATOR
             elif value < 0 and value < prev_row['MACD_Hist']: 
                 conclusion, color = "削弱：空頭動能增強 (綠柱放大)", "green"
-                score_change = -1.0 * WEIGHT_PER_INDICATOR
             else:
                 conclusion, color = "中性：動能盤整 (柱狀收縮)", "orange"
-                score_change = 0
         
-        elif 'OBV' in name:
-            # value is OBV_Slope
-            if value > 0:
-                conclusion, color = "強化：資金流入 (OBV 上漲)", "red"
-                score_change = +1.0 * WEIGHT_PER_INDICATOR
-            elif value < 0:
-                conclusion, color = "削弱：資金流出 (OBV 下降)", "green"
-                score_change = -1.0 * WEIGHT_PER_INDICATOR
-            else:
-                conclusion, color = "中性：資金平衡", "orange"
-                score_change = 0
-                
         elif 'ADX' in name:
               
             if value >= 40:
                 conclusion, color = "強趨勢：極強勢趨勢 (多或空)", "red"
-                score_change = +0.5 * WEIGHT_PER_INDICATOR
             elif value >= 25:
                 conclusion, color = "強趨勢：確認強勢趨勢 (ADX > 25)", "orange"
-                score_change = +0.2 * WEIGHT_PER_INDICATOR
             else:
                 conclusion, color = "盤整：弱勢或橫盤整理 (ADX < 25)", "blue"
-                score_change = 0
 
         elif 'ATR' in name:
             avg_atr = df_clean['ATR'].iloc[-30:].mean() if len(df_clean) >= 30 else df_clean['ATR'].mean()
             if value > avg_atr * 1.5:
                 conclusion, color = "警告：極高波動性 (1.5x 平均)", "green"
-                score_change = -0.5 * WEIGHT_PER_INDICATOR # 高波動性增加風險，扣分
             elif value < avg_atr * 0.7:
                 conclusion, color = "中性：低波動性 (醞釀突破)", "orange"
-                score_change = 0.2 * WEIGHT_PER_INDICATOR # 盤整突破潛力
             else:
                 conclusion, color = "中性：正常波動性", "blue"
-                score_change = 0
 
         elif '布林通道' in name:
             high = last_row['BB_High']
@@ -345,49 +305,12 @@ def get_technical_data_df(df):
             
             if value > high:
                 conclusion, color = f"警告：價格位於上軌外側 (>{high:,.2f})", "red"
-                score_change = +0.5 * WEIGHT_PER_INDICATOR # 突破給分
             elif value < low:
                 conclusion, color = f"強化：價格位於下軌外側 (<{low:,.2f})", "green"
-                score_change = -0.5 * WEIGHT_PER_INDICATOR # 跌破給分
             else:
                 conclusion, color = f"中性：在上下軌間 ({range_pct:.2f}% 寬度)", "blue"
-                score_change = 0
-        
-        # 累積總分
-        technical_score += score_change
         
         data.append([name, value, conclusion, color])
-
-    # ----------------------------------------------------
-    # 步驟 3：總量化評分與結論
-    # ----------------------------------------------------
-    if technical_score >= 4.0:
-        final_conclusion, final_color = f"強烈多頭 (總評分：{technical_score:.2f})", "red"
-        final_signal = 1
-    elif technical_score >= 1.5:
-        final_conclusion, final_color = f"偏向多頭 (總評分：{technical_score:.2f})", "orange"
-        final_signal = 1
-    elif technical_score <= -4.0:
-        final_conclusion, final_color = f"強烈空頭 (總評分：{technical_score:.2f})", "green"
-        final_signal = -1
-    elif technical_score <= -1.5:
-        final_conclusion, final_color = f"偏向空頭 (總評分：{technical_score:.2f})", "orange"
-        final_signal = -1
-    else:
-        final_conclusion, final_color = f"中性觀望 (總評分：{technical_score:.2f})", "blue"
-        final_signal = 0
-
-    # 🚀 將總量化評分加入數據列表
-    data.append([
-        '技術面總量化評分', 
-        f"{technical_score:.2f}", 
-        final_conclusion, 
-        final_color
-    ])
-    
-    # ⭐️ 關鍵：將分數和信號寫回 last_row 供 generate_expert_fusion_signal 使用
-    last_row['Technical_Signal_Score'] = technical_score
-    last_row['Technical_Signal'] = final_signal
 
     technical_df = pd.DataFrame(data, columns=['指標名稱', '最新值', '分析結論', '顏色'])
     technical_df = technical_df.set_index('指標名稱')
@@ -569,111 +492,107 @@ def calculate_volume_rating(df):
 
     return volume_score, signal_list
 
-# 🚀 核心優化 2: 使用統一的 Technical_Signal_Score 並導入 ATR 風險管理
 def generate_expert_fusion_signal(df, fa_rating, is_long_term, currency_symbol):
     """
-    融合了統一技術評分、K線形態、FA評分，並納入了 ATR 風險控制 (TP/SL) 和 R:R 2:1 的原則。
+    基於程式碼原則生成融合信號。
     """
-    
-    if df.empty or len(df) < 2:
-        return {'action': '數據不足', 'score': 0, 'confidence': 0, 'strategy': '無法評估', 'entry_price': 0, 'take_profit': 0, 'stop_loss': 0, 'current_price': 0, 'expert_opinions': {}, 'atr': 0}
+    if df.empty:
+        return {
+            'current_price': 0,
+            'action': '中性 (Neutral)',
+            'score': 0,
+            'confidence': 50,
+            'entry_price': 0,
+            'take_profit': 0,
+            'stop_loss': 0,
+            'strategy': '無數據',
+            'atr': 0,
+            'expert_opinions': {}
+        }
 
     last_row = df.iloc[-1]
     current_price = last_row['Close']
-    atr_value = last_row.get('ATR', 0)
-    
-    expert_opinions = {}
-    
-    # ----------------------------------------------------
-    # 1. 🚀 核心優化：引入統一的技術面總量化評分 (來自 get_technical_data_df)
-    # ----------------------------------------------------
-    technical_score = last_row.get('Technical_Signal_Score', 0) 
-    
-    # 診斷資訊
-    expert_opinions['技術面總量化評分'] = f"✅ 已採用統一總分：{technical_score:.2f} (MA, RSI, MACD, ADX, BB, ATR, OBV 的加權結果)"
-    
-    
-    # 2. K線形態專家 (K-line pattern) - 使用與先前討論一致的邏輯
-    kline_score = 0
-    is_up_bar = last_row['Close'] > last_row['Open']
-    # 確保 ATR 不為零，避免乘法或除法錯誤
-    atr_check = atr_value if atr_value > 0 else 1 
-    is_strong_up = is_up_bar and (last_row['Close'] - last_row['Open']) > atr_value * 0.7 
-    is_strong_down = not is_up_bar and (last_row['Open'] - last_row['Close']) > atr_value * 0.7
+    atr = last_row.get('ATR', 0)
 
-    if is_strong_up:
-        kline_score = 1.0
-        expert_opinions['K線形態分析'] = "強化：實體大陽線（> 0.7 ATR），買盤積極。"
-    elif is_strong_down:
-        kline_score = -1.0
-        expert_opinions['K線形態分析'] = "削弱：實體大陰線（> 0.7 ATR），賣壓沉重。"
-    else:
-        kline_score = 0
-        expert_opinions['K線形態分析'] = "中性：K線實體小，觀望。"
+    # 技術分析判斷
+    ta_score = 0
+    opinions = {}
 
-    # 3. 融合評分 (Technical + K-line + FA Score)
-    fa_normalized_score = ((fa_rating['Combined_Rating'] / 9) * 3) if 'Combined_Rating' in fa_rating else 0
-    
-    # ⭐️ 核心融合：簡潔且精準的融合公式
-    fusion_score = technical_score + kline_score + fa_normalized_score
-    
-    # 最終行動
-    action = "觀望 (Neutral)"
-    if fusion_score >= 4.0: action = "買進 (Buy)"
-    elif fusion_score >= 1.0: action = "中性偏買 (Hold/Buy)"
-    elif fusion_score <= -4.0: action = "賣出 (Sell/Short)"
-    elif fusion_score <= -1.0: action = "中性偏賣 (Hold/Sell)"
-        
-    # 信心指數
-    MAX_SCORE = 13.5 # 總分上限約為 (Tech 9.5 + K-line 1.0 + FA 3.0)
-    confidence = min(100, max(0, 50 + (fusion_score / MAX_SCORE) * 50))
-    
-    # 風險控制與交易策略 (R:R 2:1 的原則)
-    risk_multiple = 2.0 # 使用 2.0 ATR 作為風險單位
-    reward_multiple = 2.0 # 追求 2:1 的回報風險比
-    
-    entry_buffer = atr_value * 0.3 # 允許 0.3 ATR 的緩衝
-    
-    # ⭐️ 優化價格顯示精度: 如果價格低於 100 且非台幣，則使用 4 位小數，否則使用 2 位
-    price_format_specifier = ".4f" if current_price < 100 and currency_symbol != 'NT$' else ".2f"
-    
-    if action in ["買進 (Buy)", "中性偏買 (Hold/Buy)"]:
-        entry = current_price - entry_buffer
-        # 止損距離 = ATR * risk_multiple
-        stop_loss = entry - (atr_value * risk_multiple)
-        # 止盈距離 = 止損距離 * reward_multiple
-        take_profit = entry + (atr_value * risk_multiple * reward_multiple)
-        
-        # 修正 strategy_desc 中的 price_format_specifier
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format_specifier}} (± {entry_buffer:{price_format_specifier}})** 範圍內尋找支撐或等待回調進場。"
-    elif action in ["賣出 (Sell/Short)", "中性偏賣 (Hold/Sell)"]:
-        entry = current_price + entry_buffer
-        # 止損距離 = ATR * risk_multiple
-        stop_loss = entry + (atr_value * risk_multiple)
-        # 止盈距離 = 止損距離 * reward_multiple
-        take_profit = entry - (atr_value * risk_multiple * reward_multiple)
-        
-        # 修正 strategy_desc 中的 price_format_specifier
-        strategy_desc = f"基於{action}信號，建議在 **{currency_symbol}{entry:{price_format_specifier}} (± {entry_buffer:{price_format_specifier}})** 範圍內尋找阻力或等待反彈後進場。"
+    # MA 趨勢
+    if last_row['EMA_10'] > last_row['EMA_50'] > last_row['EMA_200']:
+        ta_score += 2
+        opinions['MA 趨勢'] = '強多頭排列'
+    elif last_row['EMA_10'] < last_row['EMA_50'] < last_row['EMA_200']:
+        ta_score -= 2
+        opinions['MA 趨勢'] = '強空頭排列'
     else:
-        entry = current_price
-        stop_loss = current_price - atr_value
-        take_profit = current_price + atr_value
-        strategy_desc = "市場信號混亂，建議等待趨勢明朗或在區間內操作。"
+        opinions['MA 趨勢'] = '中性'
+
+    # RSI
+    if last_row['RSI'] > 70:
+        ta_score -= 1
+        opinions['RSI'] = '超買'
+    elif last_row['RSI'] < 30:
+        ta_score += 1
+        opinions['RSI'] = '超賣'
+    elif last_row['RSI'] > 50:
+        ta_score += 1
+        opinions['RSI'] = '多頭區間'
+    else:
+        ta_score -= 1
+        opinions['RSI'] = '空頭區間'
+
+    # MACD
+    if last_row['MACD_Hist'] > 0:
+        ta_score += 1
+        opinions['MACD'] = '多頭動能'
+    else:
+        ta_score -= 1
+        opinions['MACD'] = '空頭動能'
+
+    # ADX
+    if last_row['ADX'] > 25:
+        opinions['ADX'] = '強趨勢'
+    else:
+        opinions['ADX'] = '盤整'
+
+    # 基本面
+    fa_score = fa_rating['Combined_Rating'] / 9 * 3 if 'Combined_Rating' in fa_rating else 0
+
+    # 總分
+    total_score = ta_score + fa_score
+    confidence = min(100, abs(total_score) * 20 + 50)
+
+    # 行動
+    if total_score > 2:
+        action = '買進 (Buy)'
+    elif total_score > 0:
+        action = '中性偏買 (Hold/Buy)'
+    elif total_score < -2:
+        action = '賣出 (Sell/Short)'
+    elif total_score < 0:
+        action = '中性偏賣 (Hold/Sell)'
+    else:
+        action = '中性 (Neutral)'
+
+    # 策略點位
+    entry_price = current_price
+    take_profit = current_price + atr * 2 if total_score > 0 else current_price - atr * 2
+    stop_loss = current_price - atr if total_score > 0 else current_price + atr
+    strategy = '基於MA/RSI/MACD融合基本面'
 
     return {
+        'current_price': current_price,
         'action': action,
-        'score': round(fusion_score, 2),
-        'confidence': round(confidence, 0),
-        'strategy': strategy_desc,
-        'entry_price': entry,
+        'score': total_score,
+        'confidence': confidence,
+        'entry_price': entry_price,
         'take_profit': take_profit,
         'stop_loss': stop_loss,
-        'current_price': current_price,
-        'expert_opinions': expert_opinions,
-        'atr': atr_value
+        'strategy': strategy,
+        'atr': atr,
+        'expert_opinions': opinions
     }
-
 
 def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna()
@@ -876,9 +795,6 @@ def main():
                     df = calculate_technical_indicators(df) 
                     fa_result = calculate_fundamental_rating(final_symbol_to_analyze)
                     
-                    # ⚠️ 確保先執行 get_technical_data_df 來計算 Technical_Signal_Score
-                    get_technical_data_df(df.copy()) 
-
                     analysis = generate_expert_fusion_signal(
                         df, 
                         fa_rating=fa_result, 
@@ -947,11 +863,8 @@ def main():
         
         col_core_1, col_core_2, col_core_3, col_core_4 = st.columns(4)
         
-        # ⭐️ 價格顯示精度與貨幣符號
-        price_format_specifier = ".4f" if current_price < 100 and currency_symbol != 'NT$' else ".2f"
-
         with col_core_1: 
-            st.metric("💰 當前價格", f"{currency_symbol}{current_price:{price_format_specifier}}", f"{change:+.2f} ({change_pct:+.2f}%)", delta_color=price_delta_color)
+            st.metric("💰 當前價格", f"{currency_symbol}{current_price:,.2f}", f"{change:+.2f} ({change_pct:+.2f}%)", delta_color=price_delta_color)
             
         with col_core_2:
             st.markdown("**🎯 最終行動建議**")
@@ -983,19 +896,14 @@ def main():
         reward = abs(analysis['take_profit'] - analysis['entry_price'])
         risk_reward = reward / risk if risk > 0 else float('inf')
 
-        # ⭐️ 確保點位顯示精度一致
-        price_format_entry = ".4f" if analysis['entry_price'] < 100 and currency_symbol != 'NT$' else ".2f"
-        price_format_tp = ".4f" if analysis['take_profit'] < 100 and currency_symbol != 'NT$' else ".2f"
-        price_format_sl = ".4f" if analysis['stop_loss'] < 100 and currency_symbol != 'NT$' else ".2f"
-        
         with col_strat_1:
             st.markdown(f"**建議操作:** <span class='{action_class}' style='font-size: 18px;'>**{analysis['action']}**</span>", unsafe_allow_html=True)
         with col_strat_2:
-            st.markdown(f"**建議進場價:** <span style='color:#cc6600;'>**{currency_symbol}{analysis['entry_price']:{price_format_entry}}**</span>", unsafe_allow_html=True)
+            st.markdown(f"**建議進場價:** <span style='color:#cc6600;'>**{currency_symbol}{analysis['entry_price']:.2f}**</span>", unsafe_allow_html=True)
         with col_strat_3:
-            st.markdown(f"**🚀 止盈價 (TP):** <span style='color:red;'>**{currency_symbol}{analysis['take_profit']:{price_format_tp}}**</span>", unsafe_allow_html=True)
+            st.markdown(f"**🚀 止盈價 (TP):** <span style='color:red;'>**{currency_symbol}{analysis['take_profit']:.2f}**</span>", unsafe_allow_html=True)
         with col_strat_4:
-            st.markdown(f"**🛑 止損價 (SL):** <span style='color:green;'>**{currency_symbol}{analysis['stop_loss']:{price_format_sl}}**</span>", unsafe_allow_html=True)
+            st.markdown(f"**🛑 止損價 (SL):** <span style='color:green;'>**{currency_symbol}{analysis['stop_loss']:.2f}**</span>", unsafe_allow_html=True)
             
         st.info(f"**💡 策略總結:** **{analysis['strategy']}** | **⚖️ 風險/回報比 (R:R):** **{risk_reward:.2f}** | **波動單位 (ATR):** {analysis.get('atr', 0):.4f}")
         
@@ -1080,7 +988,7 @@ def main():
             st.info(f"回測無法執行或無交易信號：{backtest_results.get('message', '數據不足或發生錯誤。')}")
 
         st.markdown("---")
-
+        
         st.subheader("🛠️ 技術指標狀態表")
         technical_df = get_technical_data_df(df)
         
