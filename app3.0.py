@@ -233,6 +233,21 @@ def calculate_technical_indicators(df):
         df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume']) 
         df['OBV_EMA_20'] = ta.trend.ema_indicator(df['OBV'], window=20)
         df['OBV_Slope'] = df['OBV_EMA_20'].diff() 
+
+    # Chaikin Money Flow (CMF)資金動能
+    # 使用 20 期
+    if 'Volume' in df.columns and not df['Volume'].isnull().all():
+        df['CMF'] = ta.volume.chaikin_money_flow(
+        df['High'], df['Low'], df['Close'], df['Volume'], window=20
+        )
+
+    # Keltner Channel (KC) 區間
+    df['KC_Middle'] = ta.trend.ema_indicator(df['Close'], window=20)
+    df['KC_Upper'] = df['KC_Middle'] + (ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=20) * 2)
+    df['KC_Lower'] = df['KC_Middle'] - (ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=20) * 2)
+
+    #	RSI 9 期背離判斷
+    df['RSI_SMA_3'] = ta.trend.sma_indicator(df['RSI'], window=3) 
     
     return df
 
@@ -306,6 +321,39 @@ def get_technical_data_df(df):
                 conclusion, color = "削弱：資金流出 (OBV 下降)", "green"
             else:
                 conclusion, color = "中性：資金平衡", "orange"
+
+        # CMF 資金動能判斷邏輯
+        elif 'CMF' in name:
+            # CMF > 0.05 代表資金淨流入，< -0.05 代表資金淨流出
+            if value > 0.05:
+                conclusion, color = "強化：資金持續流入 (動能強)", "red"
+            elif value < -0.05:
+                conclusion, color = "削弱：資金持續流出 (動能弱)", "green"
+            else:
+                conclusion, color = "中性：資金平衡/觀望", "orange"
+
+        # 波動區間判斷邏輯 (用於突破確認)
+        elif 'Keltner' in name:
+            kc_upper = last_row['KC_Upper']
+            kc_lower = last_row['KC_Lower']
+            
+            # 判斷價格是否突破上下軌道 (趨勢確認信號)
+            if value > kc_upper:
+                conclusion, color = f"強化：突破上軌 ({kc_upper:.2f}) - 強多頭趨勢", "red"
+            elif value < kc_lower:
+                conclusion, color = f"削弱：跌破下軌 ({kc_lower:.2f}) - 強空頭趨勢", "green"
+            else:
+                conclusion, color = "中性：價格在區間內震盪", "orange"
+
+        # RSI 背離訊號判斷邏輯 (此處為基礎判斷，可後續引入背離複雜邏輯)
+        elif 'RSI 背離訊號' in name:
+            # 基礎判斷：RSI 趨勢與 MACD/MA 趨勢的一致性
+            if value > prev_row['RSI_SMA_3']:
+                conclusion, color = "強化：RSI 趨勢向上 - 動能積聚", "red"
+            elif value < prev_row['RSI_SMA_3']:
+                conclusion, color = "削弱：RSI 趨勢向下 - 動能衰退", "green"
+            else:
+                conclusion, color = "中性：RSI 趨勢盤整", "orange"
         
         elif 'ADX' in name:
               # ADX > 25 確認強趨勢
@@ -1118,4 +1166,3 @@ if __name__ == '__main__':
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
     st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
-
