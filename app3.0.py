@@ -151,8 +151,10 @@ def get_currency_symbol(symbol):
 # ==============================================================================
 # 3. 技術分析 (TA) 計算 - (app3.0 修正: 引入動態窗口和完整的指標集)
 # ==============================================================================
-
 def calculate_technical_indicators(df):
+    """
+    計算並添加所有需要的技術指標。已修正 KAMA 和 HMA 的 AttributeError。
+    """
     
     # 設置動態窗口，確保在數據點不足時不會生成過多的 NaN
     data_len = len(df)
@@ -172,16 +174,18 @@ def calculate_technical_indicators(df):
     df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=win_200)
     
     df['LWMA_20'] = ta.trend.wma_indicator(df['Close'], window=win_20)
-    # 修正: 用 EMA 替代 HMA，解決 AttributeError
+    # 修正 1: HMA (Hull Moving Average) 因 ta 庫無此函式，故使用 EMA 替代
     df['HMA_14'] = ta.trend.ema_indicator(df['Close'], window=win_14)
-    df['KAMA_10'] = ta.trend.kama(df['Close'], window=win_10)
+    
+    # ⭐ 修正 2: KAMA (Kaufman's Adaptive Moving Average) 移至 ta.momentum
+    df['KAMA_10'] = ta.momentum.kama(df['Close'], window=win_10)
 
 
     # --- 2. 動能與震盪指標 (RSI, MACD, StochRSI, CCI, Williams %R) ---
     macd_instance = ta.trend.MACD(df['Close'], window_fast=win_12, window_slow=win_26, window_sign=win_9) 
     df['MACD_Line'] = macd_instance.macd()
     df['MACD_Signal'] = macd_instance.macd_signal()
-    df['MACD_Hist'] = macd_instance.macd_diff() # app3.0 命名, 替換 app2.0 的 df['MACD']
+    df['MACD_Hist'] = macd_instance.macd_diff() 
     df['MACD'] = df['MACD_Hist'] # 保留 app2.0 的 MACD 欄位，確保兼容性
 
     df['RSI'] = ta.momentum.rsi(df['Close'], window=win_14)
@@ -198,7 +202,7 @@ def calculate_technical_indicators(df):
     df['ADX_DI_P'] = ta.trend.adx_pos(df['High'], df['Low'], df['Close'], window=win_14)
     df['ADX_DI_N'] = ta.trend.adx_neg(df['High'], df['Low'], df['Close'], window=win_14)
     
-    ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'], window1=win_9, window2=win_26, window3=52) # 52是標準值
+    ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'], window1=win_9, window2=win_26, window3=52)
     df['Ichimoku_Convert'] = ichimoku.ichimoku_conversion_line()
     df['Ichimoku_Base'] = ichimoku.ichimoku_base_line()
     df['Ichimoku_Lag'] = ichimoku.ichimoku_lagging_span()
@@ -210,7 +214,6 @@ def calculate_technical_indicators(df):
     df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum() 
 
     return df
-
 
 # ==============================================================================
 # 4. 輔助數據/評分模擬函式 (app3.0 新增: 解決 NameError)
@@ -770,6 +773,7 @@ if __name__ == '__main__':
         FULL_SYMBOLS_MAP["MSFT"] = {"name": "微軟 (Microsoft)", "keywords": ["微軟", "Microsoft", "MSFT", "雲端", "AI"]}
         
     main()
+
 
 
 
