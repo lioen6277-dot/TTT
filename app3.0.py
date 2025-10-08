@@ -21,10 +21,10 @@ st.set_page_config(
 )
 
 # 週期映射
-PERIOD_MAP = {
-    "30 分": ("60d", "30m"),
-    "4 小時": ("1y", "90m"),
-    "1 日": ("5y", "1d"),
+PERIOD_MAP = { 
+    "30 分": ("60d", "30m"), 
+    "4 小時": ("1y", "60m"), 
+    "1 日": ("5y", "1d"), 
     "1 週": ("max", "1wk")
 }
 
@@ -629,6 +629,7 @@ if __name__ == '__main__':
     if 'data_ready' not in st.session_state: st.session_state['data_ready'] = False
     if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW"
     main()
+
 
 
 
