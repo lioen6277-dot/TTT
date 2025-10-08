@@ -767,6 +767,6 @@ if __name__ == '__main__':
     if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW" # 保持 app2.0 的默認值
     
     main()
-```
+
 
 
