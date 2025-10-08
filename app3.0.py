@@ -1,3 +1,5 @@
+# app_ai_fusion_v10_FINAL.py (已修正所有已知的 AttributeError，並融合所有進階功能)
+
 import re
 import warnings
 import numpy as np
@@ -7,7 +9,7 @@ import streamlit as st
 import ta
 import yfinance as yf
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta # 確保 app2.0 的 time/datetime 相關功能保留
+from datetime import datetime, timedelta
 
 # 警告過濾
 warnings.filterwarnings('ignore')
@@ -25,7 +27,7 @@ st.set_page_config(
 # 週期映射：(YFinance Period, YFinance Interval)
 PERIOD_MAP = {
     "30 分": ("60d", "30m"),
-    "4 小時": ("1y", "90m"), # 使用 90m 確保與 yfinance 相容性 (app3.0 修正)
+    "4 小時": ("1y", "90m"), 
     "1 日": ("5y", "1d"),
     "1 週": ("max", "1wk")
 }
@@ -84,7 +86,6 @@ for category, codes in CATEGORY_MAP.items():
 # ==============================================================================
 
 def get_symbol_from_query(query: str) -> str:
-    # ... (app2.0 邏輯不變)
     query = query.strip()
     query_upper = query.upper()
 
@@ -102,7 +103,6 @@ def get_symbol_from_query(query: str) -> str:
 
 @st.cache_data(ttl=3600, show_spinner="正在從 Yahoo Finance 獲取數據...")
 def get_stock_data(symbol, period, interval):
-    # ... (app2.0 邏輯不變，增加錯誤檢查)
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=interval, auto_adjust=True)
@@ -119,7 +119,6 @@ def get_stock_data(symbol, period, interval):
 
 @st.cache_data(ttl=3600)
 def get_company_info(symbol):
-    # ... (app2.0 邏輯不變，增加分類和貨幣)
     info = FULL_SYMBOLS_MAP.get(symbol, {})
     if info:
         if symbol.endswith(".TW") or symbol.startswith("^TWII"): category, currency = "台股 (TW)", "TWD"
@@ -149,12 +148,10 @@ def get_currency_symbol(symbol):
 
 
 # ==============================================================================
-# 3. 技術分析 (TA) 計算 - (app3.0 修正: 引入動態窗口和完整的指標集)
+# 3. 技術分析 (TA) 計算 - (已修正 HMA 和 KAMA 的 AttributeError)
 # ==============================================================================
+
 def calculate_technical_indicators(df):
-    """
-    計算並添加所有需要的技術指標。已修正 KAMA 和 HMA 的 AttributeError。
-    """
     
     # 設置動態窗口，確保在數據點不足時不會生成過多的 NaN
     data_len = len(df)
@@ -202,7 +199,7 @@ def calculate_technical_indicators(df):
     df['ADX_DI_P'] = ta.trend.adx_pos(df['High'], df['Low'], df['Close'], window=win_14)
     df['ADX_DI_N'] = ta.trend.adx_neg(df['High'], df['Low'], df['Close'], window=win_14)
     
-    ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'], window1=win_9, window2=win_26, window3=52)
+    ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'], window1=win_9, window2=win_26, window3=52) # 52是標準值
     df['Ichimoku_Convert'] = ichimoku.ichimoku_conversion_line()
     df['Ichimoku_Base'] = ichimoku.ichimoku_base_line()
     df['Ichimoku_Lag'] = ichimoku.ichimoku_lagging_span()
@@ -215,16 +212,14 @@ def calculate_technical_indicators(df):
 
     return df
 
+
 # ==============================================================================
-# 4. 輔助數據/評分模擬函式 (app3.0 新增: 解決 NameError)
+# 4. 輔助數據/評分模擬函式 
 # ==============================================================================
 
 @st.cache_data(ttl=3600)
 def calculate_advanced_fundamental_rating(symbol):
-    """
-    模擬的基本面評分函式。
-    由於實際的基本面評估涉及複雜的財報數據和模型，此處返回模擬值。
-    """
+    """模擬的基本面評分函式。"""
     score = 5.5
     if symbol in ["2330.TW", "NVDA", "AAPL", "MSFT"]: score = 6.8
     elif symbol in ["BTC-USD", "^GSPC"]: score = 4.0
@@ -240,13 +235,10 @@ def calculate_advanced_fundamental_rating(symbol):
 
 @st.cache_data(ttl=3600)
 def get_chips_and_news_analysis(symbol):
-    """
-    模擬的籌碼與新聞分析函式。
-    由於實際的籌碼分析涉及 Level 2 數據，此處返回模擬值。
-    """
+    """模擬的籌碼與新聞分析函式。"""
     inst_hold_pct = 0.65 
     if symbol in ["2330.TW", "MSFT", "AAPL"]: inst_hold_pct = 0.8
-    elif symbol in ["BTC-USD", "ETH-USD"]: inst_hold_pct = 0.1 # 加密貨幣無法人
+    elif symbol in ["BTC-USD", "ETH-USD"]: inst_hold_pct = 0.1 
 
     return {
         'inst_hold_pct': inst_hold_pct, # 模擬: 65% 機構持股
@@ -256,7 +248,7 @@ def get_chips_and_news_analysis(symbol):
 
 
 # ==============================================================================
-# 5. AI 四維融合訊號生成器 (app3.0 核心)
+# 5. AI 四維融合訊號生成器 (核心模型)
 # ==============================================================================
 
 def generate_ai_fusion_signal(df, fa_rating, chips_news_data, is_long_term, currency_symbol):
@@ -370,7 +362,7 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, is_long_term, curr
     }
 
 def get_technical_data_df(df):
-    """將關鍵技術指標數據彙整為 DataFrame 以便在 Streamlit 中顯示分析結論 (app3.0 新增)"""
+    """將關鍵技術指標數據彙整為 DataFrame 以便在 Streamlit 中顯示分析結論"""
     
     if df.empty or len(df.dropna(subset=['EMA_50', 'MACD_Hist', 'RSI', 'ADX'])) < 20: return pd.DataFrame()
     df_clean = df.dropna().copy()
@@ -439,7 +431,7 @@ def get_technical_data_df(df):
 
 
 def create_comprehensive_chart(df, symbol, period_key):
-    """繪製五行式綜合圖表 (app3.0 新增)"""
+    """繪製五行式綜合圖表"""
     df_clean = df.dropna()
     if df_clean.empty: return go.Figure()
 
@@ -498,7 +490,7 @@ def create_comprehensive_chart(df, symbol, period_key):
 
 
 def run_backtest(df, initial_capital=100000, commission_rate=0.001):
-    """SMA 20/EMA 50 交叉回測 (app2.0 保留功能)"""
+    """SMA 20/EMA 50 交叉回測"""
     if df.empty or len(df.dropna(subset=['SMA_20', 'EMA_50'])) < 51: return {"total_return": 0, "win_rate": 0, "max_drawdown": 0, "total_trades": 0, "message": "數據不足或指標無法計算"}
     data = df.dropna(subset=['SMA_20', 'EMA_50']).copy()
     data['Signal'] = 0
@@ -540,7 +532,7 @@ def run_backtest(df, initial_capital=100000, commission_rate=0.001):
 
 
 # ==============================================================================
-# 6. Streamlit 主應用程式邏輯 (app3.0 融合)
+# 6. Streamlit 主應用程式邏輯 
 # ==============================================================================
 
 def main():
@@ -573,7 +565,7 @@ def main():
         on_change=sync_text_input_from_selection
     )
     
-    initial_search_input = st.session_state.get('sidebar_search_input', "2330.TW") # 保持 app2.0 的默認值
+    initial_search_input = st.session_state.get('sidebar_search_input', "2330.TW") 
     
     search_input = st.sidebar.text_input(
         '...或在這裡手動輸入代碼/名稱:', 
@@ -622,7 +614,7 @@ def main():
                 }
                 st.session_state['data_ready'] = True
     
-    # --- 結果呈現區 (app3.0 詳細呈現) ---
+    # --- 結果呈現區 ---
     if st.session_state.get('data_ready', False):
         res = st.session_state['analysis_results']
         df_clean = res['df_clean'] 
@@ -631,13 +623,13 @@ def main():
             df_clean, res['fa_result'], res['chips_news_data'], res['is_long_term'], res['currency_symbol']
         )
         
-        # 標題 (1-3)
+        # 標題
         st.header(f"📈 **{res['company_info']['name']}** ({res['final_symbol_to_analyze']}) AI趨勢分析")
         st.markdown(f"**分析週期:** **{res['selected_period_key']}** | **基本面(FA)評級:** **{res['fa_result'].get('score', 0):.1f}/7.0**")
         st.markdown(f"**基本面診斷:** {res['fa_result'].get('summary', 'N/A')}")
         st.markdown("---")
         
-        # 核心行動與量化評分 (4)
+        # 核心行動與量化評分
         st.subheader("💡 核心行動與量化評分")
         st.markdown("""<style>[data-testid="stMetricValue"] { font-size: 20px; } [data-testid="stMetricLabel"] { font-size: 13px; } .action-buy {color: #cc0000; font-weight: bold;} .action-sell {color: #1e8449; font-weight: bold;} .action-neutral {color: #cc6600; font-weight: bold;} .action-hold-buy {color: #FA8072; font-weight: bold;} .action-hold-sell {color: #80B572; font-weight: bold;}</style>""", unsafe_allow_html=True)
         
@@ -660,7 +652,7 @@ def main():
         
         st.markdown("---")
         
-        # 交易策略參考 (5)
+        # 交易策略參考
         st.subheader("🛡️ 交易策略參考 (基於 ATR 風險/報酬)")
         col_risk_1, col_risk_2, col_risk_3 = st.columns(3)
         col_risk_1.metric("🛒 建議入場價", f"{res['currency_symbol']}{analysis['entry_price']:,.2f}")
@@ -671,7 +663,7 @@ def main():
         st.caption(f"波動性 (ATR): {res['currency_symbol']}{atr_value:,.2f}。採用 2:1 風報比策略。")
         st.markdown("---")
         
-        # 關鍵技術指標數據 (6) - AI 判讀細節
+        # 關鍵技術指標數據 - AI 判讀細節
         st.subheader("📊 關鍵技術指標數據 (AI意見)")
         opinions_data = list(analysis['ai_opinions'].items())
         if 'details' in res['fa_result']:
@@ -681,7 +673,7 @@ def main():
         st.dataframe(ai_df.style.apply(lambda s: ['color: #1e8449' if '❌' in x or '空頭' in x or '削弱' in x or '超買' in x else 'color: #cc0000' if '✅' in x or '多頭' in x or '強化' in x or '超賣' in x else '' for x in s], subset=['判斷結果']), use_container_width=True)
         st.markdown("---")
         
-        # 技術指標狀態表 (7)
+        # 技術指標狀態表
         st.subheader("🛠️ 技術指標狀態表 (詳細判讀)")
         technical_df = get_technical_data_df(df_clean)
         
@@ -711,7 +703,7 @@ def main():
             
         st.markdown("---")
         
-        # 策略回測報告 (8)
+        # 策略回測報告
         st.subheader("🧪 策略回測報告 (SMA 20/EMA 50 交叉)")
         backtest_results = run_backtest(res['df'].copy()) 
         
@@ -731,13 +723,13 @@ def main():
             st.warning(f"回測無法執行或無交易信號：{backtest_results.get('message', '發生錯誤')}。請嘗試更長的分析週期（例如 '1 日' 或 '1 週'）以獲得足夠的回測數據。")
         st.markdown("---")
 
-        # 完整技術分析圖表 (9)
+        # 完整技術分析圖表
         st.subheader(f"📊 完整技術分析圖表")
         st.plotly_chart(create_comprehensive_chart(df_clean, res['final_symbol_to_analyze'], res['selected_period_key']), use_container_width=True)
         
         st.markdown("---")
 
-        # 綜合風險與免責聲明 (10)
+        # 綜合風險與免責聲明
         st.subheader("⚠️ 綜合風險與免責聲明 (Risk & Disclaimer)")
         st.caption("本AI趨勢分析模型，是基於量化集成學習 (Ensemble)的專業架構。其分析結果僅供參考用途")
         st.caption("投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並強烈建議諮詢專業金融顧問。")
@@ -767,15 +759,10 @@ def sync_text_input_from_selection():
 
 if __name__ == '__main__':
     if 'data_ready' not in st.session_state: st.session_state['data_ready'] = False
-    if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW" # 保持 app2.0 的默認值
-        
+    if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW"
+    
+    # 確保 MSFT 存在於 FULL_SYMBOLS_MAP 中
     if "MSFT" not in FULL_SYMBOLS_MAP:
         FULL_SYMBOLS_MAP["MSFT"] = {"name": "微軟 (Microsoft)", "keywords": ["微軟", "Microsoft", "MSFT", "雲端", "AI"]}
         
     main()
-
-
-
-
-
-
