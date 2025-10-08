@@ -551,9 +551,19 @@ def main():
                 st.error(f"❌ **數據不足或代碼無效：** {final_symbol}。專家模型至少需要52個數據點。")
                 st.session_state['data_ready'] = False
             else:
+                # --- 修正: 在此處計算並儲存所有需要的分析結果 ---
+                fa_result = calculate_advanced_fundamental_rating(final_symbol)
+                chips_result = get_chips_and_news_analysis(final_symbol)
+                currency_symbol = get_currency_symbol(final_symbol)
+                
                 st.session_state['results'] = {
-                    'df': calculate_technical_indicators(df), 'info': get_company_info(final_symbol),
-                    'period': selected_period_key, 'symbol': final_symbol
+                    'df': calculate_technical_indicators(df), 
+                    'info': get_company_info(final_symbol),
+                    'currency': currency_symbol,
+                    'fa': fa_result,
+                    'chips': chips_result,
+                    'period': selected_period_key, 
+                    'symbol': final_symbol
                 }
                 st.session_state['data_ready'] = True
     # --- 修正: 增加 'results' in st.session_state 檢查，防止因 App 重新整理而導致的 KeyError ---
@@ -619,5 +629,6 @@ if __name__ == '__main__':
     if 'data_ready' not in st.session_state: st.session_state['data_ready'] = False
     if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW"
     main()
+
 
 
