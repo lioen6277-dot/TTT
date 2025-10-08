@@ -790,9 +790,6 @@ if __name__ == '__main__':
     if 'data_ready' not in st.session_state: st.session_state['data_ready'] = False
     if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW" # 保持 app2.0 的默認值
     
-    # 確保 MSFT 存在於 FULL_SYMBOLS_MAP 中
-    if "MSFT" not in FULL_SYMBOLS_MAP:
-        FULL_SYMBOLS_MAP["MSFT"] = {"name": "微軟 (Microsoft)", "keywords": ["微軟", "Microsoft", "MSFT", "雲端", "AI"]}
-        
     main()
 ```
+
