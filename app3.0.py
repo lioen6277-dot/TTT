@@ -1,4 +1,4 @@
-# app_ai_fusion_v7_FINAL.py (符合 v7.0 設計規範的優化整合版 - 修正 Styler ValueError)
+# app_ai_fusion_v7_FINAL.py (符合 v7.0 設計規範的優化整合版 - 修正 Styler ValueError/順序調整)
 
 import re
 import warnings
@@ -534,6 +534,7 @@ def main():
             yf_period, yf_interval = PERIOD_MAP[selected_period_key]
             df = get_stock_data(final_symbol, yf_period, yf_interval)
             
+            # *** 修正點 1: 數據不足容錯處理 ***
             if df.empty or len(df) < 51:
                 st.error(f"❌ **數據不足或代碼無效：** {final_symbol}。請檢查代碼或更換週期（至少需要51個數據點）。")
                 st.session_state['data_ready'] = False
@@ -550,12 +551,14 @@ def main():
                 }
                 st.session_state['data_ready'] = True
     
-    # --- 結果呈現區 ---
+    # --- 結果呈現區 (順序調整) ---
     if st.session_state.get('data_ready', False):
         res = st.session_state['analysis_results']
         df_clean = res['df'].dropna(subset=['Close', 'EMA_10', 'RSI', 'MACD_Hist'])
-        if df_clean.empty:
-            st.error("❌ **數據處理失敗：** 核心技術指標計算結果為空。請嘗試更換週期或標的。")
+        
+        # 再次檢查處理後的數據集，避免後續計算崩潰
+        if df_clean.empty or len(df_clean) < 51:
+            st.error(f"❌ **數據處理失敗：** 核心技術指標計算結果不足。請嘗試更換週期或標的。")
             st.session_state['data_ready'] = False
             return
 
@@ -575,11 +578,12 @@ def main():
             delta_label = "N/A"
             delta_color = 'off'
 
-        # I. 價值投資與估值的判斷標準：呈現基本面評級
+        # I. 價值投資與估值的判斷標準：呈現基本面評級 (新順序 1-3)
         st.markdown(f"**分析週期:** **{res['selected_period_key']}** | **基本面(FA)評級:** **{res['fa_result'].get('score', 0):.1f}/7.0**")
         st.markdown(f"**基本面診斷:** {res['fa_result'].get('summary', 'N/A')}")
         st.markdown("---")
         
+        # 核心行動與量化評分 (新順序 4)
         st.subheader("💡 核心行動與量化評分")
         st.markdown("""<style>[data-testid="stMetricValue"] { font-size: 20px; } [data-testid="stMetricLabel"] { font-size: 13px; } .action-buy {color: #cc0000; font-weight: bold;} .action-sell {color: #1e8449; font-weight: bold;} .action-neutral {color: #cc6600; font-weight: bold;} .action-hold-buy {color: #FA8072; font-weight: bold;} .action-hold-sell {color: #80B572; font-weight: bold;}</style>""", unsafe_allow_html=True)
         
@@ -595,14 +599,20 @@ def main():
         col4.metric("🛡️ 信心指數", f"{analysis['confidence']:.0f}%", help="AI對此建議的信心度")
         
         st.markdown("---")
+        
+        # 交易策略參考 (新順序 5)
         st.subheader("🛡️ 交易策略參考 (基於 ATR 風險/報酬)")
         col_risk_1, col_risk_2, col_risk_3 = st.columns(3)
         col_risk_1.metric("🛒 建議入場價", f"{res['currency_symbol']}{analysis['entry_price']:,.2f}")
         col_risk_2.metric("🟢 建議止盈 (2x ATR)", f"{res['currency_symbol']}{analysis['take_profit']:,.2f}")
         col_risk_3.metric("🔴 建議止損 (1x ATR)", f"{res['currency_symbol']}{analysis['stop_loss']:,.2f}")
-        st.caption(f"波動性 (ATR): {res['currency_symbol']}{analysis['atr']:,.2f}。採用 2:1 風報比策略。")
+        
+        # 修正 ATR 顯示
+        atr_value = analysis['atr']
+        st.caption(f"波動性 (ATR): {res['currency_symbol']}{atr_value:,.2f}。採用 2:1 風報比策略。")
         st.markdown("---")
         
+        # AI判讀細節 (新順序 6)
         st.subheader("📊 AI判讀細節 (交叉驗證)")
         opinions_data = list(analysis['ai_opinions'].items())
         if 'details' in res['fa_result']:
@@ -612,6 +622,7 @@ def main():
         st.dataframe(ai_df.style.apply(lambda s: ['color: #1e8449' if '❌' in x or '空頭' in x or '削弱' in x else 'color: #cc0000' if '✅' in x or '多頭' in x or '強化' in x else '' for x in s], subset=['判斷結果']), use_container_width=True)
         st.markdown("---")
         
+        # 策略回測報告 (新順序 7)
         st.subheader("🧪 策略回測報告 (SMA 20/EMA 50 交叉)")
         backtest_results = run_backtest(df_clean.copy())
         if backtest_results.get("total_trades", 0) > 0:
@@ -627,28 +638,26 @@ def main():
                 fig_bt.update_layout(title='SMA 20/EMA 50 交叉策略資金曲線', xaxis_title='日期', yaxis_title='賬戶價值 ($)', height=300)
                 st.plotly_chart(fig_bt, use_container_width=True)
         else:
+            # 調整回測訊息，使用回測結果的message
             st.warning(f"回測無法執行或無交易信號：{backtest_results.get('message', '發生錯誤')}")
         st.markdown("---")
 
+        # 技術指標狀態表 (新順序 8)
         st.subheader("🛠️ 技術指標狀態表")
         technical_df = get_technical_data_df(df_clean)
         
-        # === START OF FIX: 修正 Pandas Styler ValueError, 統一 CSS 格式 (property: value) ===
         if not technical_df.empty:
             
+            # *** 修正點 2: Pandas Styler ValueError 修正代碼 (已包含在上次修正中) ***
             def apply_color_based_on_column(row):
                 """
                 應用顏色樣式到 '最新值' 和 '分析結論' 欄位。
                 修正：確保 CSS 字串是標準的 'property: value' 格式，且沒有多餘的結尾分號。
                 """
                 color_map = {
-                    # 趨勢強勁/多頭：紅色和粗體
                     'red': 'color: #cc0000; font-weight: bold', 
-                    # 趨勢強勁/空頭：綠色和粗體
                     'green': 'color: #1e8449; font-weight: bold', 
-                    # 中性/偏多：橘色
                     'orange': 'color: #cc6600', 
-                    # 中性/盤整/弱勢：灰色/藍色
                     'blue': 'color: #888888', 
                     'grey': 'color: #888888'
                 }
@@ -657,7 +666,6 @@ def main():
                 
                 styles = []
                 for col in row.index:
-                    # 僅對 '最新值' 和 '分析結論' 欄位應用顏色樣式
                     if col in ['最新值', '分析結論']:
                         styles.append(color_style)
                     else:
@@ -671,16 +679,25 @@ def main():
             styled_df = styled_df_full.hide(names=True, axis="columns", subset=['顏色'])
             
             st.dataframe(styled_df, use_container_width=True)
-        # === END OF FIX ===
         st.markdown("---")
 
+        # 完整技術分析圖表 (新順序 9)
         st.subheader(f"📊 完整技術分析圖表")
         st.plotly_chart(create_comprehensive_chart(df_clean, res['final_symbol_to_analyze'], res['selected_period_key']), use_container_width=True)
         
+        # 近期相關新聞 (新順序 10)
         with st.expander("📰 點此查看近期相關新聞"):
             st.markdown(res['chips_news_data'].get('news_summary', 'N/A').replace("\n", "\n\n"))
+            
+        st.markdown("---")
 
-    # --- 歡迎頁面 (符合 V. UI/UX) ---
+        # *** 修正點 3: 將免責聲明移到結果區塊最底部 ***
+        st.subheader("⚠️ 綜合風險與免責聲明 (Risk & Disclaimer)")
+        st.caption("本AI趨勢分析模型，是基於量化集成學習 (Ensemble)的專業架構。其分析結果僅供參考用途")
+        st.caption("投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並強烈建議諮詢專業金融顧問。")
+        st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
+
+    # --- 歡迎頁面 (保持不變) ---
     elif not st.session_state.get('data_ready', False):
         st.markdown("<h1 style='color: #FA8072; font-size: 32px; font-weight: bold;'>🚀 歡迎使用 AI 趨勢分析</h1>", unsafe_allow_html=True)
         st.markdown(f"請在左側選擇或輸入您想分析的標的（例如：**2330.TW**、**NVDA**、**BTC-USD**），然後點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span> 按鈕開始。", unsafe_allow_html=True)
@@ -708,8 +725,8 @@ if __name__ == '__main__':
     
     main()
     
-    # V. 免責聲明與底部資訊
-    st.markdown("---")
-    st.markdown("⚠️ **免責聲明**")
-    st.caption("本分析模型包含多位AI的量化觀點，但僅供教育與參考用途。投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並建議諮詢專業金融顧問。")
-    st.markdown("📊 **數據來源:** Yahoo Finance | **技術指標:** TA 庫 | **APP優化:** 專業程式碼專家")
+    # 移除原始的底部免責聲明，因為它已被移到 main() 函式中
+    # st.markdown("---")
+    # st.markdown("⚠️ **免責聲明**")
+    # st.caption("本分析模型包含多位AI的量化觀點，但僅供教育與參考用途。投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並建議諮詢專業金融顧問。")
+    # st.markdown("📊 **數據來源:** Yahoo Finance | **技術指標:** TA 庫 | **APP優化:** 專業程式碼專家")
