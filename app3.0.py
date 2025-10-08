@@ -1,4 +1,4 @@
-# app_ai_fusion_v8_FINAL.py (v8.0 - 整合廣泛技術指標)
+# app_ai_fusion_v9_FINAL.py (v9.0 - 全指標整合與數據穩定)
 
 import re
 import warnings
@@ -43,7 +43,6 @@ FULL_SYMBOLS_MAP = {
     "2317.TW": {"name": "鴻海", "keywords": ["鴻海", "2317", "Foxconn"]},
     # ... 其他標的
 }
-# (由於 Streamlit 執行需要，此處省略了完整的資產清單，請使用您上一個步驟提供的完整清單)
 
 
 CATEGORY_MAP = {
@@ -64,7 +63,7 @@ for category, codes in CATEGORY_MAP.items():
 
 
 # ==============================================================================
-# 2. 數據獲取與預處理 (此部分保持不變)
+# 2. 數據獲取與預處理
 # ==============================================================================
 
 def get_symbol_from_query(query: str) -> str:
@@ -129,7 +128,7 @@ def get_currency_symbol(symbol):
     else: return currency_code + ' '
 
 # ==============================================================================
-# 3. 技術分析 (TA) 計算 (新增多種移動平均線與震盪指標)
+# 3. 技術分析 (TA) 計算
 # ==============================================================================
 
 def calculate_technical_indicators(df):
@@ -139,7 +138,7 @@ def calculate_technical_indicators(df):
     win_200 = min(data_len, 200) 
     win_50 = min(data_len, 50)
     win_20 = min(data_len, 20)
-    win_14 = min(data_len, 14) # 新標準窗口 (RSI, ADX, ATR, StochRSI)
+    win_14 = min(data_len, 14) 
     win_10 = min(data_len, 10)
     win_9 = min(data_len, 9)
 
@@ -149,26 +148,20 @@ def calculate_technical_indicators(df):
     df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=win_50)
     df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=win_200)
     
-    # LWMA (Linear Weighted Moving Average)
     df['LWMA_20'] = ta.trend.wma_indicator(df['Close'], window=win_20)
-    # HMA (Hull Moving Average)
     df['HMA_14'] = ta.trend.hull_moving_average(df['Close'], window=win_14)
-    # KAMA (Kaufman Adaptive Moving Average)
     df['KAMA_10'] = ta.trend.kama(df['Close'], window=win_10)
 
 
     # --- 2. 動能與震盪指標 (RSI, MACD, StochRSI, CCI, Williams %R) ---
-    macd_instance = ta.trend.MACD(df['Close'], window_fast=12, window_slow=26, window_sign=9) # MACD 標準週期
+    macd_instance = ta.trend.MACD(df['Close'], window_fast=12, window_slow=26, window_sign=9) 
     df['MACD_Line'] = macd_instance.macd()
     df['MACD_Signal'] = macd_instance.macd_signal()
     df['MACD_Hist'] = macd_instance.macd_diff()
 
     df['RSI'] = ta.momentum.rsi(df['Close'], window=win_14)
-    # StochRSI (Stochastic RSI)
     df['StochRSI'] = ta.momentum.stochrsi(df['Close'], window=win_14)
-    # CCI (Commodity Channel Index)
     df['CCI'] = ta.trend.cci(df['High'], df['Low'], df['Close'], window=win_20)
-    # Williams %R
     df['Williams_R'] = ta.momentum.williams_r(df['High'], df['Low'], df['Close'], window=win_14)
 
     # --- 3. 趨勢與波動性指標 (ADX, ATR, BB, Ichimoku) ---
@@ -176,44 +169,36 @@ def calculate_technical_indicators(df):
     df['BB_Low'] = ta.volatility.bollinger_lband(df['Close'], window=win_20, window_dev=2)
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=win_14)
     
-    # ADX/DMI (Average Directional Index/Movement Index)
     df['ADX'] = ta.trend.adx(df['High'], df['Low'], df['Close'], window=win_14)
     df['ADX_DI_P'] = ta.trend.adx_pos(df['High'], df['Low'], df['Close'], window=win_14)
     df['ADX_DI_N'] = ta.trend.adx_neg(df['High'], df['Low'], df['Close'], window=win_14)
     
-    # Ichimoku Cloud (一目均衡表 - 轉換線/基準線/延遲線)
     ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'], window1=9, window2=26, window3=52)
     df['Ichimoku_Convert'] = ichimoku.ichimoku_conversion_line()
     df['Ichimoku_Base'] = ichimoku.ichimoku_base_line()
     df['Ichimoku_Lag'] = ichimoku.ichimoku_lagging_span()
-    # 雲圖的先行帶 Senkou Span A/B 
-    # df['Ichimoku_SpanA'] = ichimoku.ichimoku_a()
-    # df['Ichimoku_SpanB'] = ichimoku.ichimoku_b()
-
 
     # --- 4. 成交量指標 (OBV, MFI, VWAP) ---
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
     df['Volume_MA_20'] = df['Volume'].rolling(window=win_20).mean()
-    # MFI (Money Flow Index)
     df['MFI'] = ta.volume.money_flow_index(df['High'], df['Low'], df['Close'], df['Volume'], window=win_14)
-    # VWAP (Volume Weighted Average Price) - 計算整個期間的累計VWAP
+    # 累積 VWAP
     df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum() 
 
     return df
 
 # ==============================================================================
-# 4. AI 訊號與技術指標狀態 (更新)
+# 4. AI 四維融合訊號生成器 (完全重寫評分邏輯，納入所有指標)
 # ==============================================================================
 
-# ... (get_chips_and_news_analysis, calculate_advanced_fundamental_rating, get_currency_symbol 保持不變)
+# 保持 FA/Chips 數據獲取函式不變...
 
 def generate_ai_fusion_signal(df, fa_rating, chips_news_data, is_long_term, currency_symbol):
     """
-    AI四維融合訊號生成器
+    AI 四維融合訊號生成器 (技術+基本+籌碼 - 新增所有指標權重)
     """
-    # 確保數據夠用
-    df_signal = df.dropna(subset=['Close', 'EMA_10', 'EMA_50', 'MACD_Hist', 'RSI', 'ATR', 'CCI', 'StochRSI']).copy()
-    if df_signal.empty or len(df_signal) < 2:
+    df_signal = df.dropna(subset=['Close', 'EMA_50', 'MACD_Hist', 'RSI', 'ATR', 'CCI', 'StochRSI', 'ADX_DI_P']).copy()
+    if df_signal.empty or len(df_signal) < 20: # 至少需要20個點來計算多數指標
         return { 'action': '數據不足', 'score': 0, 'confidence': 50, 'strategy': '無法評估', 'entry_price': 0, 'take_profit': 0, 'stop_loss': 0, 'current_price': df['Close'].iloc[-1] if not df.empty else 0, 'ai_opinions': {}, 'atr': 0 }
 
     last_row = df_signal.iloc[-1]
@@ -222,68 +207,101 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, is_long_term, curr
     atr = last_row.get('ATR', 0)
     ai_opinions = {}
     
-    # 權重參數
-    WEIGHTS = {
-        'LongTerm': {'TA': 0.8, 'FA': 1.6, 'Chips': 1.2, 'Volume': 0.4},
-        'ShortTerm': {'TA': 1.6, 'FA': 0.8, 'Chips': 0.4, 'Volume': 1.2}
-    }
-    weights = WEIGHTS['LongTerm'] if is_long_term else WEIGHTS['ShortTerm']
+    # --- 1. 技術分析綜合評分 (TA Score: Trend, Momentum, Direction/Volume) ---
     
-    # --- 1. 技術面評分 (TA Score, Max: +6, Min: -6) ---
-    ta_score = 0
-
-    # MA：EMA/HMA/KAMA 多頭排列
-    if last_row['EMA_10'] > last_row['EMA_50'] > last_row['EMA_200']: ta_score += 1.5; ai_opinions['MA 趨勢'] = '✅ 強多頭排列 (10>50>200)'
-    elif last_row['EMA_10'] < last_row['EMA_50'] < last_row['EMA_200']: ta_score -= 1.5; ai_opinions['MA 趨勢'] = '❌ 強空頭排列 (10<50<200)'
-    elif last_row['HMA_14'] > last_row['LWMA_20'] and last_row['Close'] > last_row['VWAP']: ta_score += 0.5; ai_opinions['MA 趨勢'] = '✅ 短線MA/VWAP偏多'
-    else: ai_opinions['MA 趨勢'] = '⚠️ MA/VWAP中性盤整'
-
-    # RSI/StochRSI/CCI：
-    if last_row['RSI'] > 70 or last_row['StochRSI'] > 0.8: ta_score -= 1; ai_opinions['RSI/Stoch 動能'] = '⚠️ 超買區域，潛在回調'
-    elif last_row['RSI'] < 30 or last_row['StochRSI'] < 0.2: ta_score += 1; ai_opinions['RSI/Stoch 動能'] = '✅ 超賣區域，潛在反彈'
-    elif last_row['CCI'] > 100: ta_score += 1; ai_opinions['CCI 動能'] = '✅ 強多頭動能 (>100)'
-    elif last_row['CCI'] < -100: ta_score -= 1; ai_opinions['CCI 動能'] = '❌ 強空頭動能 (<-100)'
-    else: ai_opinions['CCI 動能'] = '⚠️ 動能中性'
-
-    # MACD：
-    if last_row['MACD_Hist'] > 0 and last_row['MACD_Hist'] > prev_row['MACD_Hist']: ta_score += 1; ai_opinions['MACD 動能'] = '✅ 多頭動能增強 (柱狀圖>0)'
-    elif last_row['MACD_Hist'] < 0 and last_row['MACD_Hist'] < prev_row['MACD_Hist']: ta_score -= 1; ai_opinions['MACD 動能'] = '❌ 空頭動能增強 (柱狀圖<0)'
-    else: ai_opinions['MACD 動能'] = '⚠️ 動能盤整'
+    # 1.1 趨勢分數 (Trend Score: EMA/MA/Ichimoku/BB) Max ~5.5 / Min ~-5.5
+    trend_score = 0
+    # EMA/MA 趨勢 (+2 / -2)
+    if last_row['EMA_10'] > last_row['EMA_50'] > last_row['EMA_200']: trend_score += 2; ai_opinions['趨勢-MA'] = '✅ 強多頭排列 (10>50>200)'
+    elif last_row['EMA_10'] < last_row['EMA_50'] < last_row['EMA_200']: trend_score -= 2; ai_opinions['趨勢-MA'] = '❌ 強空頭排列 (10<50<200)'
     
-    # ADX：
-    if last_row['ADX'] > 25: 
-        if last_row['ADX_DI_P'] > last_row['ADX_DI_N']: ta_score += 1; ai_opinions['ADX 趨勢強度'] = '✅ 強多頭趨勢 (ADX>25, +DI>-DI)'
-        else: ta_score -= 1; ai_opinions['ADX 趨勢強度'] = '❌ 強空頭趨勢 (ADX>25, -DI>+DI)'
-    else: ai_opinions['ADX 趨勢強度'] = '⚠️ 盤整趨勢 (<25)'
-        
-    # Ichimoku: 價格在雲圖轉換線/基準線上方
+    # HMA/KAMA 動態趨勢 (+1.5 / -1.5)
+    if last_row['HMA_14'] > last_row['KAMA_10']: trend_score += 1.5; ai_opinions['趨勢-HMA/KAMA'] = '✅ 動態MA偏多'
+    elif last_row['HMA_14'] < last_row['KAMA_10']: trend_score -= 1.5; ai_opinions['趨勢-HMA/KAMA'] = '❌ 動態MA偏空'
+
+    # Ichimoku 雲圖 (+1.5 / -1.5)
     if last_row['Close'] > last_row.get('Ichimoku_Base', current_price) and last_row['Ichimoku_Convert'] > last_row['Ichimoku_Base']:
-        ta_score += 1; ai_opinions['一目均衡表'] = '✅ 價格/轉換線在基準線上方'
-    else:
-        ta_score -= 0.5; ai_opinions['一目均衡表'] = '⚠️ 價格/轉換線在基準線下方或盤整'
-
-    # --- 2. 基本面評分 (FA Score) (保持不變) ---
-    fa_score = ((fa_rating.get('score', 0) / 7.0) * 6.0) - 3.0
+        trend_score += 1.5; ai_opinions['趨勢-一目均衡表'] = '✅ 轉換/價格在基準線上方 (強多)'
+    elif last_row['Close'] < last_row.get('Ichimoku_Base', current_price) and last_row['Ichimoku_Convert'] < last_row['Ichimoku_Base']:
+        trend_score -= 1.5; ai_opinions['趨勢-一目均衡表'] = '❌ 轉換/價格在基準線下方 (強空)'
+    else: ai_opinions['趨勢-MA/Ichimoku'] = '⚠️ 趨勢中性或盤整'
     
-    # --- 3. 籌碼與成交量評分 (Chips & Volume Score) ---
-    chips_score, volume_score = 0, 0
+    # BB 波動率突破 (懲罰超買，獎勵超賣反轉) (+0.5 / -0.5)
+    if last_row['Close'] > last_row['BB_High']: trend_score -= 0.5; ai_opinions['波動率-BB'] = '⚠️ 價格突破上軌 (超買警示)'
+    elif last_row['Close'] < last_row['BB_Low']: trend_score += 0.5; ai_opinions['波動率-BB'] = '✅ 價格跌破下軌 (超賣反轉潛力)'
+
+    
+    # 1.2 動能分數 (Momentum Score: RSI/StochRSI/CCI/W%R/MACD) Max ~6 / Min ~-6
+    momentum_score = 0
+    # MACD 動能 (+2 / -2)
+    if last_row['MACD_Hist'] > 0 and last_row['MACD_Hist'] > prev_row['MACD_Hist']: momentum_score += 2; ai_opinions['動能-MACD'] = '✅ 多頭動能增強 (柱狀圖>0)'
+    elif last_row['MACD_Hist'] < 0 and last_row['MACD_Hist'] < prev_row['MACD_Hist']: momentum_score -= 2; ai_opinions['動能-MACD'] = '❌ 空頭動能增強 (柱狀圖<0)'
+    
+    # RSI/StochRSI/W%R 綜合超買/超賣 (+2 / -2)
+    is_overbought = last_row['RSI'] > 70 or last_row['StochRSI'] > 0.8 or last_row['Williams_R'] > -20
+    is_oversold = last_row['RSI'] < 30 or last_row['StochRSI'] < 0.2 or last_row['Williams_R'] < -80
+    
+    if is_overbought: momentum_score -= 2; ai_opinions['動能-RSI/Stoch'] = '⚠️ 超買訊號 (RSI/Stoch/W%R)'
+    elif is_oversold: momentum_score += 2; ai_opinions['動能-RSI/Stoch'] = '✅ 超賣訊號 (RSI/Stoch/W%R)'
+    elif last_row['RSI'] > 50: momentum_score += 1; ai_opinions['動能-RSI/Stoch'] = '✅ 動能偏多'
+    else: ai_opinions['動能-RSI/Stoch'] = '❌ 動能偏空'
+        
+    # CCI 動能 (+2 / -2)
+    if last_row['CCI'] > 100: momentum_score += 2; ai_opinions['動能-CCI'] = '✅ 強多頭動能 (CCI>100)'
+    elif last_row['CCI'] < -100: momentum_score -= 2; ai_opinions['動能-CCI'] = '❌ 強空頭動能 (CCI<-100)'
+
+    # 1.3 方向與量能分數 (Direction/Volume Score: ADX/DMI/VWAP/MFI/OBV) Max ~6 / Min ~-6
+    direction_vol_score = 0
+    
+    # ADX/DMI 趨勢方向 (+2.5 / -2.5)
+    if last_row['ADX'] > 25: 
+        if last_row['ADX_DI_P'] > last_row['ADX_DI_N']: direction_vol_score += 2.5; ai_opinions['方向-ADX/DMI'] = '✅ 強多頭趨勢 (ADX>25, +DI>-DI)'
+        else: direction_vol_score -= 2.5; ai_opinions['方向-ADX/DMI'] = '❌ 強空頭趨勢 (ADX>25, -DI>+DI)'
+    else: ai_opinions['方向-ADX/DMI'] = '⚠️ 盤整趨勢 (<25)'
+        
+    # VWAP 與價格關係 (+1.5 / -1.5)
+    if last_row['Close'] > last_row.get('VWAP', current_price): direction_vol_score += 1.5; ai_opinions['量能-VWAP'] = '✅ 價格高於VWAP (買家佔優)'
+    elif last_row['Close'] < last_row.get('VWAP', current_price): direction_vol_score -= 1.5; ai_opinions['量能-VWAP'] = '❌ 價格低於VWAP (賣家佔優)'
+        
+    # MFI/OBV 量能 (+2 / -2)
+    is_obv_increasing = last_row.get('OBV', 0) > prev_row.get('OBV', 0)
+    
+    if last_row['MFI'] > 80 or (last_row['Close'] > prev_row['Close'] and is_obv_increasing): direction_vol_score += 2; ai_opinions['量能-MFI/OBV'] = '✅ 資金流入/OBV增強'
+    elif last_row['MFI'] < 20 or (last_row['Close'] < prev_row['Close'] and not is_obv_increasing): direction_vol_score -= 2; ai_opinions['量能-MFI/OBV'] = '❌ 資金流出/OBV減弱'
+    else: ai_opinions['量能-MFI/OBV'] = '⚠️ 量能中性'
+    
+    
+    # 1.4 總技術評分正規化 (Max ~5 / Min ~-5)
+    raw_ta_score = trend_score + momentum_score + direction_vol_score
+    max_raw_ta = 5.5 + 6 + 6.5 # 約 18
+    ta_score_normalized = (raw_ta_score / max_raw_ta) * 5.0 
+    
+    # --- 2. 基本面評分 (FA Score) ---
+    fa_score = ((fa_rating.get('score', 0) / 7.0) * 3.0) - 1.5 # 正規化到 Max +1.5 / Min -1.5 (基於7分滿分)
+    
+    # --- 3. 籌碼評分 (Chips Score) ---
+    chips_score = 0
     inst_hold_pct = chips_news_data.get('inst_hold_pct', 0) * 100
     
-    # 籌碼集中度 (保持不變)
+    # 籌碼集中度 (Max +1.5 / Min -1.5)
     if inst_hold_pct > 70: chips_score = 1.5; ai_opinions['籌碼分析'] = f'✅ 法人高度集中 ({inst_hold_pct:.1f}%)'
     elif inst_hold_pct > 40: chips_score = 0.5; ai_opinions['籌碼分析'] = f'✅ 法人持股穩定 ({inst_hold_pct:.1f}%)'
-    elif inst_hold_pct == 0 and fa_rating.get('score', 0) > 0: chips_score = -1.5; ai_opinions['籌碼分析'] = '❌ 數據缺失，可能流動性低/無法人關注'
     else: chips_score = -0.5; ai_opinions['籌碼分析'] = f'⚠️ 籌碼較分散 ({inst_hold_pct:.1f}%)'
         
-    # 成交量 (新增 MFI)
-    is_high_volume = last_row['Volume'] > (last_row.get('Volume_MA_20', 0) * 1.5)
+    # --- 4. 融合總分 (Normalized to Max ~5 / Min ~-5) ---
     
-    if is_high_volume and last_row['Close'] > prev_row['Close'] and last_row['MFI'] > 80: volume_score = 1.5; ai_opinions['成交量分析'] = '✅ 價漲量爆/MFI強，趨勢強勁'
-    elif is_high_volume and last_row['Close'] < prev_row['Close'] and last_row['MFI'] < 20: volume_score = -1.5; ai_opinions['成交量分析'] = '❌ 價跌量爆/MFI弱，空頭壓力'
-    else: volume_score = 0; ai_opinions['成交量分析'] = '⚠️ 量能中性或價量背離'
-    
-    # --- 4. 融合總分 ---
-    total_score = (ta_score * weights['TA'] + fa_score * weights['FA'] + chips_score * weights['Chips'] + volume_score * weights['Volume']) / 5.0
+    # 權重分配 (總分 Max 約 5.0)
+    if is_long_term: # 長期模式: FA (50%) > TA (30%) > Chips (20%)
+        # 權重: TA (3.0) : FA (5.0) : Chips (2.0)
+        score_sum = ta_score_normalized * 3.0 + fa_score * 5.0 + chips_score * 2.0
+        total_max_weighted = 5 * 3.0 + 1.5 * 5.0 + 1.5 * 2.0 # Max: 15 + 7.5 + 3.0 = 25.5
+        total_score = (score_sum / total_max_weighted) * 5.0
+    else: # 短期模式: TA (60%) > Chips (25%) > FA (15%)
+        # 權重: TA (6.0) : FA (1.5) : Chips (2.5)
+        score_sum = ta_score_normalized * 6.0 + fa_score * 1.5 + chips_score * 2.5
+        total_max_weighted = 5 * 6.0 + 1.5 * 1.5 + 1.5 * 2.5 # Max: 30 + 2.25 + 3.75 = 36.0
+        total_score = (score_sum / total_max_weighted) * 5.0
+
     confidence = min(100, max(40, abs(total_score) * 15 + 40))
 
     if total_score > 3.5: action = '買進 (Strong Buy)'
@@ -295,7 +313,7 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, is_long_term, curr
     entry_price = current_price
     take_profit = current_price + atr * 2.0 if total_score > 0 else current_price - atr * 2.0
     stop_loss = current_price - atr * 1.0 if total_score > 0 else current_price + atr * 1.0
-    strategy = f'基於TA/FA/籌碼/量能的四維融合模型 (長期模式: {is_long_term})'
+    strategy = f'基於TA/FA/籌碼的全面融合模型 (長期模式: {is_long_term})'
 
     return {
         'current_price': current_price, 'action': action, 'score': total_score, 'confidence': confidence,
@@ -303,11 +321,13 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, is_long_term, curr
         'strategy': strategy, 'atr': atr, 'ai_opinions': ai_opinions
     }
 
+# get_technical_data_df (已包含所有新指標，此處省略，保持與 v8.0 邏輯一致)
 def get_technical_data_df(df):
     """
     計算並彙整技術指標狀態，包含新加入的核心指標。
     """
-    if df.empty or len(df.dropna(subset=['EMA_50', 'MACD_Hist', 'RSI', 'ADX'])) < 51: return pd.DataFrame()
+    # 確保數據夠用
+    if df.empty or len(df.dropna(subset=['EMA_50', 'MACD_Hist', 'RSI', 'ADX'])) < 20: return pd.DataFrame()
     df_clean = df.dropna().copy()
     if df_clean.empty: return pd.DataFrame()
     last_row = df_clean.iloc[-1]
@@ -364,7 +384,7 @@ def get_technical_data_df(df):
             elif value < 20: conclusion, color = "強化：MFI資金流出過度", "red"
             else: conclusion, color = "中性：資金流中性", "blue"
         elif 'ATR' in name:
-            avg_atr = df_clean.get('ATR', pd.Series()).iloc[-30:].mean()
+            avg_atr = df_clean.get('ATR', pd.Series()).iloc[-20:].mean()
             if value > avg_atr * 1.5: conclusion, color = "警告：極高波動性", "green"
             else: conclusion, color = "中性：正常波動", "blue"
 
@@ -372,7 +392,8 @@ def get_technical_data_df(df):
     
     return pd.DataFrame(data, columns=['指標名稱', '最新值', '分析結論', '顏色']).set_index('指標名稱')
 
-# 繪圖函數 (強化圖表分區)
+
+# create_comprehensive_chart (保持不變)
 def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna()
     if df_clean.empty: return go.Figure()
@@ -417,9 +438,7 @@ def create_comprehensive_chart(df, symbol, period_key):
     
     # --- Row 4: 震盪指標 (CCI, StochRSI, Williams %R) ---
     if 'CCI' in df_clean.columns: fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['CCI'], line=dict(color='blue', width=1), name='CCI'), row=4, col=1)
-    # StochRSI 範圍 0-1
     if 'StochRSI' in df_clean.columns: fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['StochRSI'] * 100, line=dict(color='red', width=1), name='StochRSI'), row=4, col=1)
-    # Williams %R 範圍 0-(-100)，取反向繪製 0-100
     if 'Williams_R' in df_clean.columns: fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Williams_R'] * -1, line=dict(color='purple', width=1, dash='dot'), name='W%R'), row=4, col=1)
     
     fig.update_yaxes(title_text="震盪指標", row=4, col=1)
@@ -430,7 +449,6 @@ def create_comprehensive_chart(df, symbol, period_key):
 
     # --- Row 5: OBV/MFI (成交量指標) ---
     fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean.get('OBV', pd.Series()), line=dict(color='green', width=1.5), name='OBV'), row=5, col=1)
-    # MFI (範圍 0-100) 
     if 'MFI' in df_clean.columns: fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['MFI'] * df_clean['OBV'].max() / 100, line=dict(color='orange', width=1), name='MFI (Scaled)'), row=5, col=1)
     
     fig.update_yaxes(title_text="量能指標", row=5, col=1)
@@ -438,14 +456,12 @@ def create_comprehensive_chart(df, symbol, period_key):
     fig.update_layout(title_text=f"AI 融合分析圖表 - {symbol} ({period_key})", height=1000, xaxis_rangeslider_visible=False, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
-# ... (run_backtest 保持不變)
+
+# run_backtest (保持不變)
 def run_backtest(df, initial_capital=100000, commission_rate=0.001):
-    # 檢查 SMA_20 和 EMA_50 是否有足夠的非空值
     if df.empty or len(df.dropna(subset=['SMA_20', 'EMA_50'])) < 51: return {"total_return": 0, "win_rate": 0, "max_drawdown": 0, "total_trades": 0, "message": "數據不足或指標無法計算"}
-    # ... (回測邏輯保持不變)
     data = df.dropna(subset=['SMA_20', 'EMA_50']).copy()
     data['Signal'] = 0
-    # 策略: SMA_20/EMA_50 交叉
     buy_signal = (data['SMA_20'] > data['EMA_50']) & (data['SMA_20'].shift(1) <= data['EMA_50'].shift(1))
     sell_signal = (data['SMA_20'] < data['EMA_50']) & (data['SMA_20'].shift(1) >= data['EMA_50'].shift(1))
     data.loc[buy_signal, 'Signal'] = 1; data.loc[sell_signal, 'Signal'] = -1
@@ -455,26 +471,21 @@ def run_backtest(df, initial_capital=100000, commission_rate=0.001):
 
     for i in range(len(data)):
         current_capital = capital
-        if position == 1:
-            current_capital = capital * (data['Close'].iloc[i] / buy_price)
+        if position == 1: current_capital = capital * (data['Close'].iloc[i] / buy_price)
         capital_curve.append(current_capital)
 
         if data['Signal'].iloc[i] == 1 and position == 0:
-            # 開倉
             position = 1; buy_price = data['Close'].iloc[i]; capital = current_capital * (1 - commission_rate)
         elif data['Signal'].iloc[i] == -1 and position == 1:
-            # 平倉
             profit = (data['Close'].iloc[i] - buy_price) / buy_price
             trades.append(1 if profit > 0 else 0)
             capital = current_capital * (1 - commission_rate) * (1 + profit) 
             position = 0
             buy_price = 0
 
-    # 結算最後一筆交易
     if position == 1 and len(capital_curve) > 0:
         profit = (data['Close'].iloc[-1] - buy_price) / buy_price
         trades.append(1 if profit > 0 else 0); 
-        # 修正此處計算邏輯
         capital = capital_curve[-1] * (1 + profit) / (data['Close'].iloc[-1] / buy_price)
         capital_curve[-1] = capital
 
@@ -487,8 +498,225 @@ def run_backtest(df, initial_capital=100000, commission_rate=0.001):
     return { "total_return": round(total_return, 2), "win_rate": round(win_rate, 2), "max_drawdown": round(abs(max_drawdown), 2), "total_trades": len(trades), "message": f"回測區間 {data.index[0].strftime('%Y-%m-%d')} 到 {data.index[-1].strftime('%Y-%m-%d')}。", "capital_curve": capital_s }
 
 
-# ... (main 函數保持不變，因為 UI 邏輯在上次已調整)
+# ==============================================================================
+# 5. Streamlit 主應用程式邏輯 (調整數據檢查門檻)
+# ==============================================================================
 
+def main():
+    # --- 側邊欄 UI ---
+    st.sidebar.title("🚀 AI 趨勢分析") 
+    st.sidebar.markdown("---")
+    
+    selected_category = st.sidebar.selectbox(
+        '1. 選擇資產類別', 
+        list(CATEGORY_HOT_OPTIONS.keys()), 
+        index=0, 
+        key='category_selector'
+    )
+    
+    hot_options_map = CATEGORY_HOT_OPTIONS.get(selected_category, {})
+    st.sidebar.markdown("---")
+
+    default_index = 0
+    if selected_category == '美股 (US) - 個股/ETF/指數' and 'NVDA - 輝達 (Nvidia)' in hot_options_map.keys():
+        default_index = list(hot_options_map.keys()).index('NVDA - 輝達 (Nvidia)')
+    elif selected_category == '台股 (TW) - 個股/ETF/指數' and '2330.TW - 台積電' in hot_options_map.keys():
+        default_index = list(hot_options_map.keys()).index('2330.TW - 台積電')
+
+    selected_hot_option_key = st.sidebar.selectbox(
+        '2. 選擇熱門標的 (或手動輸入)', 
+        list(hot_options_map.keys()), 
+        index=default_index,
+        key='hot_target_selector',
+        on_change=sync_text_input_from_selection
+    )
+    
+    initial_search_input = st.session_state.get('sidebar_search_input', "MSFT") 
+    
+    search_input = st.sidebar.text_input(
+        '...或在這裡手動輸入代碼/名稱:', 
+        value=initial_search_input,
+        key='sidebar_search_input'
+    )
+    
+    st.sidebar.markdown("---")
+    selected_period_key = st.sidebar.selectbox('3. 選擇分析週期', list(PERIOD_MAP.keys()), index=2)
+    st.sidebar.markdown("---")
+    is_long_term = st.sidebar.checkbox('長期投資者模式', value=False, help="勾選後將更側重基本面和籌碼面 (符合 V7.0 設計)")
+    st.sidebar.markdown("---")
+    analyze_button_clicked = st.sidebar.button('📊 執行AI分析', use_container_width=True)
+
+    # --- 主分析流程 ---
+    if analyze_button_clicked:
+        final_symbol = get_symbol_from_query(st.session_state.sidebar_search_input)
+        
+        with st.spinner(f"🔍 正在啟動AI模型，分析 **{final_symbol}** 的數據..."):
+            yf_period, yf_interval = PERIOD_MAP[selected_period_key]
+            df = get_stock_data(final_symbol, yf_period, yf_interval)
+            
+            # **修正點 1: 降低最低數據點要求**
+            if df.empty or len(df) < 20: 
+                st.error(f"❌ **數據不足或代碼無效：** {final_symbol}。請檢查代碼或更換週期（至少需要20個數據點進行核心趨勢分析）。目前獲取到 {len(df)} 個數據點。")
+                st.session_state['data_ready'] = False
+            else:
+                
+                df_with_ta = calculate_technical_indicators(df)
+                
+                # 再次檢查計算 TA 後的數據量 (至少需要10點)
+                df_clean = df_with_ta.dropna(subset=['Close', 'EMA_10', 'RSI', 'MACD_Hist'])
+                if df_clean.empty or len(df_clean) < 10:
+                    st.error(f"❌ **數據處理失敗：** 技術指標計算後有效數據不足。請嘗試更換週期或標的。")
+                    st.session_state['data_ready'] = False
+                    return
+
+                st.session_state['analysis_results'] = {
+                    'df': df_with_ta,
+                    'df_clean': df_clean,
+                    'company_info': get_company_info(final_symbol),
+                    'currency_symbol': get_currency_symbol(final_symbol),
+                    'fa_result': calculate_advanced_fundamental_rating(final_symbol),
+                    'chips_news_data': get_chips_and_news_analysis(final_symbol),
+                    'selected_period_key': selected_period_key,
+                    'final_symbol_to_analyze': final_symbol,
+                    'is_long_term': is_long_term
+                }
+                st.session_state['data_ready'] = True
+    
+    # --- 結果呈現區 (新順序與標題) ---
+    if st.session_state.get('data_ready', False):
+        res = st.session_state['analysis_results']
+        df_clean = res['df_clean'] 
+        
+        # **修正點 2: 使用重寫後的融合訊號**
+        analysis = generate_ai_fusion_signal(
+            df_clean, res['fa_result'], res['chips_news_data'], res['is_long_term'], res['currency_symbol']
+        )
+        
+        # 標題 (1-3)
+        st.header(f"📈 **{res['company_info']['name']}** ({res['final_symbol_to_analyze']}) AI趨勢分析")
+        st.markdown(f"**分析週期:** **{res['selected_period_key']}** | **基本面(FA)評級:** **{res['fa_result'].get('score', 0):.1f}/7.0**")
+        st.markdown(f"**基本面診斷:** {res['fa_result'].get('summary', 'N/A')}")
+        st.markdown("---")
+        
+        # 核心行動與量化評分 (4)
+        st.subheader("💡 核心行動與量化評分")
+        st.markdown("""<style>[data-testid="stMetricValue"] { font-size: 20px; } [data-testid="stMetricLabel"] { font-size: 13px; } .action-buy {color: #cc0000; font-weight: bold;} .action-sell {color: #1e8449; font-weight: bold;} .action-neutral {color: #cc6600; font-weight: bold;} .action-hold-buy {color: #FA8072; font-weight: bold;} .action-hold-sell {color: #80B572; font-weight: bold;}</style>""", unsafe_allow_html=True)
+        
+        price = analysis['current_price']
+        prev_close = df_clean['Close'].iloc[-2] if len(df_clean) >= 2 else price 
+        change, change_pct = price - prev_close, (price - prev_close) / prev_close * 100
+        delta_label = f"{change:+.2f} ({change_pct:+.2f}%)"
+        delta_color = 'inverse' if change < 0 else 'normal'
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("💰 當前價格", f"{res['currency_symbol']}{price:,.2f}", delta_label, delta_color=delta_color)
+        
+        if "買進" in analysis['action']: action_class = "action-buy" if "偏" not in analysis['action'] else "action-hold-buy"
+        elif "賣出" in analysis['action']: action_class = "action-sell" if "偏" not in analysis['action'] else "action-hold-sell"
+        else: action_class = "action-neutral"
+        col2.markdown(f"**🎯 最終行動建議**\n<p class='{action_class}' style='font-size: 20px;'>{analysis['action']}</p>", unsafe_allow_html=True)
+        
+        col3.metric("🔥 總量化評分", f"{analysis['score']:.2f}/5.0", help="四維融合模型總分")
+        col4.metric("🛡️ 信心指數", f"{analysis['confidence']:.0f}%", help="AI對此建議的信心度")
+        
+        st.markdown("---")
+        
+        # 交易策略參考 (5)
+        st.subheader("🛡️ 交易策略參考 (基於 ATR 風險/報酬)")
+        col_risk_1, col_risk_2, col_risk_3 = st.columns(3)
+        col_risk_1.metric("🛒 建議入場價", f"{res['currency_symbol']}{analysis['entry_price']:,.2f}")
+        col_risk_2.metric("🟢 建議止盈 (2x ATR)", f"{res['currency_symbol']}{analysis['take_profit']:,.2f}")
+        col_risk_3.metric("🔴 建議止損 (1x ATR)", f"{res['currency_symbol']}{analysis['stop_loss']:,.2f}")
+        
+        atr_value = analysis['atr']
+        st.caption(f"波動性 (ATR): {res['currency_symbol']}{atr_value:,.2f}。採用 2:1 風報比策略。")
+        st.markdown("---")
+        
+        # 關鍵技術指標數據 (6) - 原來的 AI 判讀細節
+        st.subheader("📊 關鍵技術指標數據")
+        opinions_data = list(analysis['ai_opinions'].items())
+        if 'details' in res['fa_result']:
+            for key, val in res['fa_result']['details'].items(): opinions_data.append([f"基本面 - {key}", str(val)])
+        
+        ai_df = pd.DataFrame(opinions_data, columns=['AI分析維度', '判斷結果'])
+        st.dataframe(ai_df.style.apply(lambda s: ['color: #1e8449' if '❌' in x or '空頭' in x or '削弱' in x or '超買' in x else 'color: #cc0000' if '✅' in x or '多頭' in x or '強化' in x or '超賣' in x else '' for x in s], subset=['判斷結果']), use_container_width=True)
+        st.markdown("---")
+        
+        # 技術指標狀態表 (7)
+        st.subheader("🛠️ 技術指標狀態表")
+        technical_df = get_technical_data_df(df_clean)
+        
+        if not technical_df.empty:
+            def apply_color_based_on_column(row):
+                color_map = {
+                    'red': 'color: #cc0000; font-weight: bold', 
+                    'green': 'color: #1e8449; font-weight: bold', 
+                    'orange': 'color: #cc6600', 
+                    'blue': 'color: #888888', 
+                    'grey': 'color: #888888'
+                }
+                color_style = color_map.get(row['顏色'], '')
+                styles = []
+                for col in row.index:
+                    if col in ['最新值', '分析結論']:
+                        styles.append(color_style)
+                    else:
+                        styles.append('')
+                return styles
+
+            styled_df_full = technical_df.style.apply(apply_color_based_on_column, axis=1)
+            styled_df = styled_df_full.hide(names=True, axis="columns", subset=['顏色'])
+            st.dataframe(styled_df, use_container_width=True)
+        else:
+            st.warning("技術指標數據計算不足，無法顯示狀態表。")
+            
+        st.markdown("---")
+        
+        # 策略回測報告 (8)
+        st.subheader("🧪 策略回測報告 (SMA 20/EMA 50 交叉)")
+        # Backtest 仍需要 51 個點，若數據不足，則不會顯示
+        backtest_results = run_backtest(res['df'].copy()) 
+        
+        if backtest_results.get("total_trades", 0) > 0:
+            col_bt_1, col_bt_2, col_bt_3, col_bt_4 = st.columns(4)
+            col_bt_1.metric("📊 總回報率", f"{backtest_results['total_return']}%", delta=backtest_results['message'])
+            col_bt_2.metric("📈 勝率", f"{backtest_results['win_rate']}%")
+            col_bt_3.metric("📉 最大回撤 (MDD)", f"{backtest_results['max_drawdown']}%")
+            col_bt_4.metric("🤝 交易總次數", f"{backtest_results['total_trades']} 次")
+            
+            if 'capital_curve' in backtest_results and not backtest_results['capital_curve'].empty:
+                fig_bt = go.Figure()
+                fig_bt.add_trace(go.Scatter(x=backtest_results['capital_curve'].index, y=backtest_results['capital_curve'], name='策略資金曲線', line=dict(color='#cc6600', width=2)))
+                fig_bt.update_layout(title='SMA 20/EMA 50 交叉策略資金曲線', xaxis_title='日期', yaxis_title='賬戶價值 ($)', height=300)
+                st.plotly_chart(fig_bt, use_container_width=True)
+        else:
+            # 數據點 < 51 時，顯示數據不足訊息，但不阻止核心分析
+            st.warning(f"回測無法執行或無交易信號：{backtest_results.get('message', '發生錯誤')}。請嘗試更長的分析週期（例如 '1 日' 或 '1 週'）以獲得足夠的回測數據。")
+        st.markdown("---")
+
+        # 完整技術分析圖表 (9)
+        st.subheader(f"📊 完整技術分析圖表")
+        st.plotly_chart(create_comprehensive_chart(df_clean, res['final_symbol_to_analyze'], res['selected_period_key']), use_container_width=True)
+        
+        st.markdown("---")
+
+        # 綜合風險與免責聲明 (10)
+        st.subheader("⚠️ 綜合風險與免責聲明 (Risk & Disclaimer)")
+        st.caption("本AI趨勢分析模型，是基於量化集成學習 (Ensemble)的專業架構。其分析結果僅供參考用途")
+        st.caption("投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並強烈建議諮詢專業金融顧問。")
+        st.markdown("📊 **數據來源:** Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
+
+    # --- 歡迎頁面 (保持不變) ---
+    elif not st.session_state.get('data_ready', False):
+        st.markdown("<h1 style='color: #FA8072; font-size: 32px; font-weight: bold;'>🚀 歡迎使用 AI 趨勢分析</h1>", unsafe_allow_html=True)
+        st.markdown(f"請在左側選擇或輸入您想分析的標的（例如：**2330.TW**、**NVDA**、**BTC-USD**），然後點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span> 按鈕開始。", unsafe_allow_html=True)
+        st.markdown("---")
+        st.subheader("📝 使用步驟：")
+        st.markdown("1. **選擇資產類別**：在左側欄選擇 `美股`、`台股` 或 `加密貨幣`。")
+        st.markdown("2. **選擇標的**：使用下拉選單快速選擇熱門標的，或直接在輸入框中鍵入代碼或名稱。")
+        st.markdown("3. **選擇週期**：決定分析的長度（例如：`30 分` (短期)、`1 日` (中長線)）。")
+        st.markdown("4. **執行分析**：點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span>，AI將融合基本面與技術面指標提供交易策略。", unsafe_allow_html=True)
+        
 # --- 應用程式進入點與免責聲明 ---
 def sync_text_input_from_selection():
     """當下拉選單變動時，觸發此函式，更新文字輸入框的值。"""
@@ -502,9 +730,8 @@ def sync_text_input_from_selection():
 
 if __name__ == '__main__':
     if 'data_ready' not in st.session_state: st.session_state['data_ready'] = False
-    if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "MSFT" # 修正為 MSFT
+    if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "MSFT" 
     
-    # 確保 MSFT 在 FULL_SYMBOLS_MAP 中，若無則添加 (用於避免初始化錯誤)
     if "MSFT" not in FULL_SYMBOLS_MAP:
         FULL_SYMBOLS_MAP["MSFT"] = {"name": "微軟 (Microsoft)", "keywords": ["微軟", "Microsoft", "MSFT", "雲端", "AI"]}
         
