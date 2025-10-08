@@ -1,4 +1,4 @@
-# app_ai_fusion_v7_FINAL.py (符合 v7.0 設計規範的優化整合版 - 修正 Styler KeyError)
+# app_ai_fusion_v7_FINAL.py (符合 v7.0 設計規範的優化整合版 - 修正 Styler ValueError)
 
 import re
 import warnings
@@ -633,30 +633,41 @@ def main():
         st.subheader("🛠️ 技術指標狀態表")
         technical_df = get_technical_data_df(df_clean)
         
-        # === START OF FIX: 修正 Pandas Styler ValueError/KeyError, 改用 row-wise 應用 (axis=1) ===
+        # === START OF FIX: 修正 Pandas Styler ValueError, 統一 CSS 格式 (property: value) ===
         if not technical_df.empty:
+            
             def apply_color_based_on_column(row):
-                """Applies color style to '最新值' and '分析結論' based on the value in '顏色'."""
-                color_map = {'red': 'color: #cc0000; font-weight: bold;', 'green': 'color: #1e8449; font-weight: bold;', 'orange': 'color: #cc6600;', 'blue': '#888888', 'grey': '#888888'}
+                """
+                應用顏色樣式到 '最新值' 和 '分析結論' 欄位。
+                修正：確保 CSS 字串是標準的 'property: value' 格式，且沒有多餘的結尾分號。
+                """
+                color_map = {
+                    # 趨勢強勁/多頭：紅色和粗體
+                    'red': 'color: #cc0000; font-weight: bold', 
+                    # 趨勢強勁/空頭：綠色和粗體
+                    'green': 'color: #1e8449; font-weight: bold', 
+                    # 中性/偏多：橘色
+                    'orange': 'color: #cc6600', 
+                    # 中性/盤整/弱勢：灰色/藍色
+                    'blue': 'color: #888888', 
+                    'grey': 'color: #888888'
+                }
                 
-                # 1. Get the style based on the '顏色' value of the current row
                 color_style = color_map.get(row['顏色'], '')
                 
-                # 2. Return a list of style strings for all columns in the row (must match row length).
-                #    Apply the style only to '最新值' and '分析結論'.
                 styles = []
                 for col in row.index:
+                    # 僅對 '最新值' 和 '分析結論' 欄位應用顏色樣式
                     if col in ['最新值', '分析結論']:
                         styles.append(color_style)
                     else:
                         styles.append('')
                 return styles
 
-            # 3. Apply the row-wise style to the full DataFrame
+            # 應用 row-wise 樣式
             styled_df_full = technical_df.style.apply(apply_color_based_on_column, axis=1)
 
-            # 4. Filter the styled DataFrame to only show '最新值' and '分析結論' (hiding '顏色')
-            # 確保 subset 包含要隱藏的欄位
+            # 隱藏 '顏色' 欄位
             styled_df = styled_df_full.hide(names=True, axis="columns", subset=['顏色'])
             
             st.dataframe(styled_df, use_container_width=True)
