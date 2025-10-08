@@ -553,11 +553,11 @@ def main():
             else:
                 st.session_state['results'] = {
                     'df': calculate_technical_indicators(df), 'info': get_company_info(final_symbol),
-                    'currency': get_currency_symbol(final_symbol), 'fa': calculate_advanced_fundamental_rating(final_symbol),
-                    'chips': get_chips_and_news_analysis(final_symbol), 'period': selected_period_key, 'symbol': final_symbol
+                    'period': selected_period_key, 'symbol': final_symbol
                 }
                 st.session_state['data_ready'] = True
-    if st.session_state.get('data_ready', False):
+    # --- 修正: 增加 'results' in st.session_state 檢查，防止因 App 重新整理而導致的 KeyError ---
+    if st.session_state.get('data_ready', False) and 'results' in st.session_state:
         res = st.session_state['results']
         analysis = generate_ai_expert_signal(res['df'], res['fa'], res['chips'], res['currency'])
         st.header(f"📈 {res['info']['name']} ({res['symbol']}) AI 專家分析報告")
@@ -619,4 +619,5 @@ if __name__ == '__main__':
     if 'data_ready' not in st.session_state: st.session_state['data_ready'] = False
     if 'sidebar_search_input' not in st.session_state: st.session_state['sidebar_search_input'] = "2330.TW"
     main()
+
 
