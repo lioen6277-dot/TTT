@@ -1,4 +1,4 @@
-# app_ai_fusion_v10_FINAL.py (已修正所有已知的 AttributeError，並融合所有進階功能)
+# app_ai_fusion_v10_FINAL.py (已修正所有已知的 AttributeError 和 TypeError，並融合所有進階功能)
 
 import re
 import warnings
@@ -27,7 +27,7 @@ st.set_page_config(
 # 週期映射：(YFinance Period, YFinance Interval)
 PERIOD_MAP = {
     "30 分": ("60d", "30m"),
-    "4 小時": ("1y", "90m"), 
+    "4 小時": ("1y", "90m"),
     "1 日": ("5y", "1d"),
     "1 週": ("max", "1wk")
 }
@@ -148,7 +148,7 @@ def get_currency_symbol(symbol):
 
 
 # ==============================================================================
-# 3. 技術分析 (TA) 計算 - (已修正 HMA 和 KAMA 的 AttributeError)
+# 3. 技術分析 (TA) 計算 - (已修正 HMA/KAMA/Williams_R 的錯誤)
 # ==============================================================================
 
 def calculate_technical_indicators(df):
@@ -175,20 +175,22 @@ def calculate_technical_indicators(df):
     df['HMA_14'] = ta.trend.ema_indicator(df['Close'], window=win_14)
     
     # ⭐ 修正 2: KAMA (Kaufman's Adaptive Moving Average) 移至 ta.momentum
-    df['KAMA_10'] = ta.momentum.kama(df['Close'], window=win_10)
-
+    df['KAMA_10'] = ta.momentum.kama(df['Close'], window=win_10) # 修正 KAMA 從 trend 移到 momentum
 
     # --- 2. 動能與震盪指標 (RSI, MACD, StochRSI, CCI, Williams %R) ---
     macd_instance = ta.trend.MACD(df['Close'], window_fast=win_12, window_slow=win_26, window_sign=win_9) 
     df['MACD_Line'] = macd_instance.macd()
     df['MACD_Signal'] = macd_instance.macd_signal()
     df['MACD_Hist'] = macd_instance.macd_diff() 
-    df['MACD'] = df['MACD_Hist'] # 保留 app2.0 的 MACD 欄位，確保兼容性
+    df['MACD'] = df['MACD_Hist'] 
 
     df['RSI'] = ta.momentum.rsi(df['Close'], window=win_14)
     df['StochRSI'] = ta.momentum.stochrsi(df['Close'], window=win_14)
     df['CCI'] = ta.trend.cci(df['High'], df['Low'], df['Close'], window=win_20)
-    df['Williams_R'] = ta.momentum.williams_r(df['High'], df['Low'], df['Close'], window=win_14)
+    
+    # ⭐ 修正 3: Williams_R 的參數從 window 改為 lbp (Look Back Period)，解決 TypeError
+    df['Williams_R'] = ta.momentum.williams_r(df['High'], df['Low'], df['Close'], lbp=win_14)
+
 
     # --- 3. 趨勢與波動性指標 (ADX, ATR, BB, Ichimoku) ---
     df['BB_High'] = ta.volatility.bollinger_hband(df['Close'], window=win_20, window_dev=2)
@@ -214,7 +216,7 @@ def calculate_technical_indicators(df):
 
 
 # ==============================================================================
-# 4. 輔助數據/評分模擬函式 
+# 4. 輔助數據/評分模擬函式 (其餘程式碼與先前版本一致)
 # ==============================================================================
 
 @st.cache_data(ttl=3600)
