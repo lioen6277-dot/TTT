@@ -769,8 +769,8 @@ if __name__ == '__main__':
     if "MSFT" not in FULL_SYMBOLS_MAP:
         FULL_SYMBOLS_MAP["MSFT"] = {"name": "微軟 (Microsoft)", "keywords": ["微軟", "Microsoft", "MSFT", "雲端", "AI"]}
         
-        
     main()
+
 
 
 
