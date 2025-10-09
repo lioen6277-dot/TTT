@@ -1,3 +1,4 @@
+# app6.0.py - 自動風險控制版
 import re
 import warnings
 import numpy as np
@@ -16,20 +17,26 @@ warnings.filterwarnings('ignore')
 # ==============================================================================
 
 st.set_page_config(
-    page_title="AI趨勢分析📈 (v4.0 - 多模型止損)",
+    page_title="AI趨勢分析📈 (v6.0 - 自動風險控制)",
     page_icon="🤖",
     layout="wide"
 )
 
-# 週期映射：(YFinance Period, YFinance Interval)
+# 週期映射
 PERIOD_MAP = { 
     "30 分": ("60d", "30m"), 
-    "4 小時": ("1y", "90m"), # 修正為 90m 提高穩定性
+    "4 小時": ("1y", "90m"), # 使用 90m 提高穩定性
     "1 日": ("5y", "1d"), 
     "1 週": ("max", "1wk")
 }
 
-# 🚀 您的【所有資產清單】(請根據您的 app3.0.py 保持此處的完整列表)
+# 🔥 V6.0 固定風險控制參數 (自動判斷，無須手動調整)
+FIXED_SL_MULTIPLIER = 1.5 # 止損倍數 (固定 1.5 x ATR)
+FIXED_TP_MULTIPLIER = 3.0 # 止盈倍數 (固定 3.0 x ATR)
+RISK_MODEL_NAME = "固定 ATR 動態模型 (SL=1.5x, TP=3.0x)"
+
+
+# 🚀 您的【所有資產清單】(保持 app3.0 的擴充清單)
 FULL_SYMBOLS_MAP = {
     # ----------------------------------------------------
     # A. 美股核心 (US Stocks) - 個股
@@ -46,6 +53,8 @@ FULL_SYMBOLS_MAP = {
     "BABA": {"name": "阿里巴巴", "keywords": ["阿里巴巴", "BABA", "中概股"]},
     "ADBE": {"name": "Adobe", "keywords": ["Adobe", "ADBE"]},
     "ACN": {"name": "Accenture (埃森哲)", "keywords": ["Accenture", "ACN", "諮詢", "科技服務"]},
+    "ARKG": {"name": "方舟基因體革命ETF (ARK Genomic)", "keywords": ["ARKG", "基因科技", "生物科技ETF"]},
+    "ARKK": {"name": "方舟創新ETF (ARK Innovation)", "keywords": ["ARKK", "CathieWood", "創新ETF", "木頭姐"]},
     # ----------------------------------------------------
     # B. 美股核心 (US Stocks) - ETF/指數
     # ----------------------------------------------------
@@ -72,7 +81,7 @@ FULL_SYMBOLS_MAP = {
 
 
 # ==============================================================================
-# 2. 數據獲取與指標計算 (新增 BB, PSAR)
+# 2. 數據獲取與指標計算
 # ==============================================================================
 
 @st.cache_data(ttl=3600)
@@ -80,22 +89,30 @@ def get_data(symbol, period_tuple):
     """從 Yahoo Finance 獲取數據"""
     period, interval = period_tuple
     try:
-        df = yf.download(symbol, period=period, interval=interval, progress=False)
+        # 使用 auto_adjust=True 確保價格數據準確
+        df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
         if df.empty:
             return None
         # 排除最後一根不完整的 K 線
         if interval not in ['1d', '1wk']:
             df = df.iloc[:-1] 
+        # 處理可能的重複索引問題
+        df = df[~df.index.duplicated(keep='last')]
         return df
     except Exception as e:
-        st.error(f"獲取數據失敗: {e}")
         return None
 
 def calculate_technical_indicators(df):
-    """
-    計算核心技術指標，新增 ATR, BB, PSAR
-    """
-    if df is None or df.empty: return pd.DataFrame()
+    """計算核心技術指標，包括 ATR"""
+    if df is None or df.empty: 
+        return pd.DataFrame()
+
+    required_cols = ['High', 'Low', 'Close']
+    if not all(col in df.columns for col in required_cols):
+        return pd.DataFrame()
+    
+    # 確保數據類型正確
+    df = df.astype({'High': float, 'Low': float, 'Close': float, 'Open': float})
 
     # --- 核心趨勢指標 ---
     df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20)
@@ -107,8 +124,8 @@ def calculate_technical_indicators(df):
     df['MACD_Line'] = macd.macd()
     df['MACD_Signal'] = macd.macd_signal()
     
-    # 🔥 V4.0 風險管理指標
-    # 1. ATR (Average True Range)
+    # --- 風險管理指標 ---
+    # 1. ATR (Average True Range) - 風險控制的核心
     df['ATR'] = ta.volatility.AverageTrueRange(df['High'], df['Low'], df['Close'], window=14).average_true_range()
     
     # 2. 布林通道 (Bollinger Bands)
@@ -118,7 +135,6 @@ def calculate_technical_indicators(df):
     df['BB_Mid'] = bb.bollinger_mavg()
     
     # 3. 拋物線 SAR (Parabolic SAR)
-    # 使用預設參數 (0.02, 0.2)，適合趨勢追蹤
     psar = ta.trend.PSAR(df['High'], df['Low'], df['Close'], step=0.02, max_step=0.2)
     df['PSAR_Up'] = psar.psar_up()
     df['PSAR_Down'] = psar.psar_down()
@@ -127,54 +143,33 @@ def calculate_technical_indicators(df):
 
 
 # ==============================================================================
-# 3. 核心：動態止損/止盈水平計算
+# 3. 核心：固定止損/止盈水平計算 (使用固定 ATR 乘數)
 # ==============================================================================
 
-def calculate_stop_levels(entry_data, risk_model, sl_multiplier, tp_multiplier):
+def calculate_stop_levels_fixed_atr(entry_data, sl_multiplier, tp_multiplier):
     """
-    根據選定的風險模型和入場數據，計算止損 (SL) 和止盈 (TP) 價格水平。
+    固定使用 ATR 模型計算止損 (SL) 和止盈 (TP) 價格水平。
     """
     entry_price = entry_data['Close']
     
-    if entry_data.isnull().any():
+    if entry_data.isnull().any() or pd.isna(entry_data['ATR']):
         return None, None
         
-    # --- ATR 動態模型 (基礎波動率調整) ---
-    if risk_model == 'ATR 動態模型':
-        # 多頭: SL = 入場價 - SL_Multiplier * ATR, TP = 入場價 + TP_Multiplier * ATR
-        stop_loss = entry_price - sl_multiplier * entry_data['ATR']
-        take_profit = entry_price + tp_multiplier * entry_data['ATR']
-        
-    # --- 布林通道 (BB) 模型 (通道邊界) ---
-    elif risk_model == '布林通道 (BB) 模型':
-        # 多頭: SL = 中軌 - SL_Multiplier * ATR (增加緩衝避免中軌假跌破)
-        # TP = 上軌 (BB_High)
-        stop_loss = entry_data['BB_Mid'] - sl_multiplier * entry_data['ATR'] 
-        take_profit = entry_data['BB_High'] 
-        
-    # --- 拋物線 SAR (PSAR) 追蹤模型 (動態追蹤) ---
-    elif risk_model == '拋物線 SAR (PSAR) 追蹤模型':
-        # SL = 當前 PSAR 點位 (在回測中動態更新)
-        # TP 設為一個寬鬆的水平 (例如 6xATR) 讓 PSAR 追蹤止損發揮最大作用
-        stop_loss = entry_data['PSAR_Up'] # 入場時的 PSAR 上軌
-        take_profit = entry_price + 6.0 * entry_data['ATR']
-        
-    else:
-        # 預設回到 ATR 模型
-        stop_loss = entry_price - sl_multiplier * entry_data['ATR']
-        take_profit = entry_price + tp_multiplier * entry_data['ATR']
-
+    # 多頭策略: SL = 入場價 - SL_Multiplier * ATR, TP = 入場價 + TP_Multiplier * ATR
+    stop_loss = entry_price - sl_multiplier * entry_data['ATR']
+    take_profit = entry_price + tp_multiplier * entry_data['ATR']
+    
     # 確保多頭策略下 SL < Entry < TP
     if stop_loss >= entry_price:
-        stop_loss = entry_price * 0.95 # 如果計算結果無效，給予 5% 的保護
+        stop_loss = entry_price * 0.99 # 極端情況下確保止損點在下方
     if take_profit <= entry_price:
-         take_profit = entry_price * 1.05 # 如果計算結果無效，給予 5% 的利潤空間
+         take_profit = entry_price * 1.01 # 極端情況下確保止盈點在上方
 
     return stop_loss, take_profit
 
 
 # ==============================================================================
-# 4. 趨勢信號與回測邏輯 (核心優化部分)
+# 4. 趨勢信號與回測邏輯 (固定 ATR 策略應用)
 # ==============================================================================
 
 def generate_trend_signal(df):
@@ -189,23 +184,33 @@ def generate_trend_signal(df):
     
     # 移除重複信號
     df['Position'] = df['Signal'].replace(to_replace=0, method='ffill').fillna(0)
+    # 透過 EntryExit 判斷是否為實際的交易信號點 (1:入場, -1:出場)
     df['EntryExit'] = df['Position'].diff().fillna(0).apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    # 將非交易信號點的 Signal 設為 0
     df.loc[df['EntryExit'] == 0, 'Signal'] = 0 
+    # 只保留入場點的 Signal=1, 出場點的 Signal=-1
+    df.loc[df['EntryExit'] == -1, 'Signal'] = -1
+    df.loc[df['EntryExit'] == 1, 'Signal'] = 1
 
-    return df
+    return df.drop(columns=['EntryExit']) # 刪除 EntryExit 輔助欄位
 
-def backtest_strategy_with_risk_management(df, capital=100000, risk_model='ATR 動態模型', sl_multiplier=1.5, tp_multiplier=3.0):
+def backtest_strategy_with_risk_management(df, capital=100000):
     """
-    🔥 V4.0 核心優化：執行回測策略，根據 `risk_model` 應用動態止損止盈。
+    🔥 V6.0 核心：執行回測策略，應用【固定 ATR 動態止損止盈】。
     """
-    df = df.copy().dropna(subset=['Signal', 'ATR', 'BB_High', 'PSAR_Up', 'PSAR_Down', 'BB_Mid']) 
+    # 確保數據完整，尤其是 ATR 和 Signal 欄位
+    df = df.copy().dropna(subset=['Signal', 'ATR']) 
 
     trades = []
     current_position = None
     entry_price = 0
     entry_index = None
-    # 入場時計算的固定 SL/TP 水平
-    stop_loss_price_initial = 0  
+    
+    # 使用全局固定的 ATR 參數
+    sl_multiplier = FIXED_SL_MULTIPLIER
+    tp_multiplier = FIXED_TP_MULTIPLIER
+
+    stop_loss_price = 0  
     take_profit_price = 0 
 
     for i in range(len(df)):
@@ -214,69 +219,60 @@ def backtest_strategy_with_risk_management(df, capital=100000, risk_model='ATR �
         current_high = current_data['High']
         current_low = current_data['Low']
         
-        # --- 1. 動態 SL 更新 (僅適用於 PSAR 模型) ---
-        stop_loss_price_tracking = stop_loss_price_initial # 預設為初始 SL
-        if current_position == 'Buy' and risk_model == '拋物線 SAR (PSAR) 追蹤模型':
-            # PSAR 追蹤止損點會隨著價格上漲而不斷抬高
-            # 我們使用前一根 K 線的 PSAR 點位作為當前的止損價
-            if i > 0 and not pd.isna(df.iloc[i-1]['PSAR_Up']):
-                stop_loss_price_tracking = max(stop_loss_price_initial, df.iloc[i-1]['PSAR_Up'])
-            # 如果 PSAR 點位已經翻轉為 PSAR_Down，則視為信號反轉平倉 (在下面的平倉邏輯處理)
-        
-        # --- 2. 平倉邏輯 (優先檢查 SL/TP/PSAR 反轉) ---
+        # --- 1. 平倉邏輯 (優先檢查 SL/TP/反轉信號) ---
         if current_position == 'Buy':
             
-            # 2a. 止損檢查：使用動態或初始 SL
-            if current_low <= stop_loss_price_tracking:
+            # 1a. 止損檢查
+            if current_low <= stop_loss_price:
                 # 止損平倉：假設以止損價平倉
-                profit = (stop_loss_price_tracking - entry_price) / entry_price * 100 
-                trades.append({'entry_date': entry_index, 'exit_date': df.index[i], 'type': 'Buy', 'profit': profit, 'status': 'SL', 'price': stop_loss_price_tracking, 'atr_sl': stop_loss_price_tracking, 'atr_tp': take_profit_price})
+                profit = (stop_loss_price - entry_price) / entry_price * 100 
+                trades.append({'entry_date': entry_index, 'exit_date': df.index[i], 'type': 'Buy', 'profit': profit, 'status': 'SL', 'price': stop_loss_price, 'atr_sl': stop_loss_price, 'atr_tp': take_profit_price})
                 current_position = None
-                continue
+                # 如果出現反向信號，則繼續檢查是否要開新倉 (確保平倉後可以立即反手)
+                if current_data['Signal'] == -1: 
+                    current_position = None
+                    continue
+                continue # 已平倉，進入下一根 K 線
             
-            # 2b. 止盈檢查
+            # 1b. 止盈檢查
             elif current_high >= take_profit_price and take_profit_price != 0:
                 # 止盈平倉：假設以止盈價平倉
                 profit = (take_profit_price - entry_price) / entry_price * 100 
-                trades.append({'entry_date': entry_index, 'exit_date': df.index[i], 'type': 'Buy', 'profit': profit, 'status': 'TP', 'price': take_profit_price, 'atr_sl': stop_loss_price_tracking, 'atr_tp': take_profit_price})
+                trades.append({'entry_date': entry_index, 'exit_date': df.index[i], 'type': 'Buy', 'profit': profit, 'status': 'TP', 'price': take_profit_price, 'atr_sl': stop_loss_price, 'atr_tp': take_profit_price})
                 current_position = None
-                continue
+                if current_data['Signal'] == -1: 
+                    current_position = None
+                    continue
+                continue # 已平倉，進入下一根 K 線
             
-            # 2c. 反向信號平倉 (MA 交叉反轉)
+            # 1c. 反向信號平倉 (MA 交叉反轉)
             elif current_data['Signal'] == -1:
                 profit = (current_close - entry_price) / entry_price * 100
-                trades.append({'entry_date': entry_index, 'exit_date': df.index[i], 'type': 'Buy', 'profit': profit, 'status': 'Signal_Close', 'price': current_close, 'atr_sl': stop_loss_price_tracking, 'atr_tp': take_profit_price})
+                trades.append({'entry_date': entry_index, 'exit_date': df.index[i], 'type': 'Buy', 'profit': profit, 'status': 'Signal_Close', 'price': current_close, 'atr_sl': stop_loss_price, 'atr_tp': take_profit_price})
                 current_position = None
-                continue
-
-
-        # --- 3. 開倉邏輯 ---
+                # 繼續執行到下一段，檢查是否需要反手開空 (即 Signal = -1)
+        
+        # --- 2. 開倉邏輯 (在沒有持倉且出現買入信號時) ---
         if current_position is None and current_data['Signal'] == 1:
             
             entry_data = current_data
             
-            # 根據模型計算初始 SL/TP
-            sl_level, tp_level = calculate_stop_levels(entry_data, risk_model, sl_multiplier, tp_multiplier)
+            # 根據固定 ATR 參數計算初始 SL/TP
+            sl_level, tp_level = calculate_stop_levels_fixed_atr(entry_data, sl_multiplier, tp_multiplier)
             
             if sl_level is not None and tp_level is not None:
                 entry_price = current_close
                 entry_index = df.index[i]
-                stop_loss_price_initial = sl_level
+                stop_loss_price = sl_level
                 take_profit_price = tp_level
                 current_position = 'Buy'
                 
-        # 4. 處理未平倉部位 (Open Position)
+        # 3. 處理未平倉部位 (Open Position)
         if current_position == 'Buy' and i == len(df) - 1:
             last_close = df['Close'].iloc[-1]
-            
-            # 結算時 PSAR 追蹤止損的最終點位
-            if risk_model == '拋物線 SAR (PSAR) 追蹤模型':
-                 # 使用當前計算的追蹤止損價 (或最後一個 PSAR 點)
-                 stop_loss_price_tracking = df['PSAR_Up'].iloc[-1] if not pd.isna(df['PSAR_Up'].iloc[-1]) else stop_loss_price_initial
-            
             profit = (last_close - entry_price) / entry_price * 100
                 
-            trades.append({'entry_date': entry_index, 'exit_date': df.index[-1], 'type': current_position, 'profit': profit, 'status': 'Open', 'price': last_close, 'atr_sl': stop_loss_price_tracking, 'atr_tp': take_profit_price})
+            trades.append({'entry_date': entry_index, 'exit_date': df.index[-1], 'type': current_position, 'profit': profit, 'status': 'Open', 'price': last_close, 'atr_sl': stop_loss_price, 'atr_tp': take_profit_price})
 
     # 統計回測結果
     trades_df = pd.DataFrame(trades)
@@ -286,25 +282,28 @@ def backtest_strategy_with_risk_management(df, capital=100000, risk_model='ATR �
     if not closed_trades_df.empty:
         closed_trades_df['return_factor'] = 1 + closed_trades_df['profit'] / 100
         closed_trades_df.set_index('exit_date', inplace=True)
-        # 處理同一 K 線平倉多次導致的 index 重複問題
+        # 處理同一 K 棒平倉和開倉的情況，只保留最後一個結果
         closed_trades_df = closed_trades_df[~closed_trades_df.index.duplicated(keep='last')]
         
         temp_curve = closed_trades_df['return_factor'].cumprod() * capital
         capital_curve = pd.concat([capital_curve, temp_curve]).sort_index()
-        # 確保曲線從 $100,000 開始，且不重複
         capital_curve = capital_curve[~capital_curve.index.duplicated(keep='first')]
 
     total_trades = len(trades_df)
     total_closed_trades = len(closed_trades_df)
     
-    # 計算結果
+    # 計算回測指標
     if total_closed_trades > 0 and len(capital_curve) > 1:
         win_trades = len(closed_trades_df[closed_trades_df['profit'] > 0])
         total_return = (capital_curve.iloc[-1] / capital_curve.iloc[0] - 1) * 100
         win_rate = (win_trades / total_closed_trades) * 100
-        max_drawdown = ((capital_curve.cummax() - capital_curve) / capital_curve.cummax()).max() * 100
+        # 最大回撤計算
+        capital_curve = capital_curve.replace([np.inf, -np.inf], np.nan).dropna()
+        if not capital_curve.empty:
+            max_drawdown = ((capital_curve.cummax() - capital_curve) / capital_curve.cummax()).max() * 100
+        else:
+            max_drawdown = 0
     else:
-        # 如果沒有足夠的交易或曲線數據，設置為 0
         total_return = 0
         win_rate = 0
         max_drawdown = 0
@@ -317,16 +316,16 @@ def backtest_strategy_with_risk_management(df, capital=100000, risk_model='ATR �
         'total_trades': total_trades,
         'trades_summary': trades_df, 
         'capital_curve': capital_curve,
-        'message': f"模型: {risk_model}"
+        'message': RISK_MODEL_NAME
     }
 
 
 # ==============================================================================
-# 5. 圖表繪製與 Streamlit 介面 (新增 PSAR 繪製)
+# 5. 趨勢評分與圖表繪製 (保持不變)
 # ==============================================================================
 
 def calculate_score(df, symbol):
-    # (維持 V3.0 的簡化趨勢評分邏輯)
+    """計算趨勢評分與建議 (與 V3.0 相同)"""
     score = 0
     if df['SMA_20'].iloc[-1] > df['EMA_50'].iloc[-1]:
         score += 25 
@@ -347,7 +346,7 @@ def calculate_score(df, symbol):
     }
 
 def create_comprehensive_chart(df, symbol, period):
-    """繪製綜合 K 線圖，加入 BB/PSAR"""
+    """繪製綜合 K 線圖，加入 BB/PSAR (與 V3.0 相同)"""
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.1, 
                         row_heights=[0.6, 0.2, 0.2])
@@ -366,12 +365,11 @@ def create_comprehensive_chart(df, symbol, period):
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], mode='lines', name='SMA 20', line=dict(color='yellow', width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='purple', width=1)), row=1, col=1)
     
-    # 布林通道 (BB) - 可作為輔助支撐/阻力 (Row 1)
+    # 布林通道 (BB)
     fig.add_trace(go.Scatter(x=df.index, y=df['BB_High'], mode='lines', name='BB 上軌', line=dict(color='lime', width=0.5, dash='dash')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['BB_Low'], mode='lines', name='BB 下軌', line=dict(color='lime', width=0.5, dash='dash')), row=1, col=1)
 
-    # 拋物線 SAR (PSAR) - 作為動態追蹤止損點 (Row 1)
-    # 僅繪製 PSAR_Up (多頭模式下的追蹤止損點)
+    # 拋物線 SAR (PSAR)
     fig.add_trace(go.Scatter(x=df.index, y=df['PSAR_Up'], mode='markers', name='PSAR 追蹤點', 
                              marker=dict(color='cyan', size=3, symbol='circle')), row=1, col=1)
 
@@ -401,48 +399,25 @@ def create_comprehensive_chart(df, symbol, period):
 
 def app():
     
-    # --- 側邊欄配置 (新增 SL/TP 模型選擇) ---
-    st.sidebar.markdown("<h1 style='color: #FA8072; font-size: 24px; font-weight: bold;'>🎯 風險管理參數 (v4.0)</h1>", unsafe_allow_html=True)
-    
-    # 🔥 核心：選擇止盈止損模型
-    risk_model = st.sidebar.selectbox("🛡️ 選擇止盈止損模型", 
-                                      ['ATR 動態模型', '布林通道 (BB) 模型', '拋物線 SAR (PSAR) 追蹤模型'], 
-                                      key='risk_model')
+    # --- 側邊欄配置 (移除所有風險模型參數，只顯示固定策略) ---
+    st.sidebar.markdown("<h1 style='color: #FA8072; font-size: 24px; font-weight: bold;'>🎯 自動風險控制 (v6.0)</h1>", unsafe_allow_html=True)
+    st.sidebar.info(f"🛡️ **策略模型**：{RISK_MODEL_NAME}")
+    # 計算 R:R
+    rr_ratio = round(FIXED_TP_MULTIPLIER/FIXED_SL_MULTIPLIER, 1)
+    st.sidebar.info(f"📊 **風險報酬比 (R:R)**：1:{rr_ratio}")
     
     st.sidebar.markdown("---")
     
-    # 根據模型顯示對應的參數
-    sl_multiplier = 1.5
-    tp_multiplier = 3.0
-    
-    if risk_model == 'ATR 動態模型':
-        sl_multiplier = st.sidebar.slider("📉 止損倍數 (SL xATR)", 0.5, 3.0, 1.5, 0.1)
-        tp_multiplier = st.sidebar.slider("📈 止盈倍數 (TP xATR)", 1.0, 6.0, 3.0, 0.5)
-        rr_ratio = round(tp_multiplier/sl_multiplier, 1) if sl_multiplier != 0 else np.inf
-        st.sidebar.markdown(f"**ℹ️ 風險報酬比 (R:R)**: **1:{rr_ratio}**", unsafe_allow_html=True)
-    
-    elif risk_model == '布林通道 (BB) 模型':
-        st.sidebar.markdown("**止盈**：上軌 (2σ) / **止損**：中軌 ± 波動率緩衝")
-        sl_multiplier = st.sidebar.slider("📉 SL 波動率緩衝 (xATR)", 0.5, 3.0, 1.5, 0.1, help="此數值用於計算中軌下方的 SL 緩衝")
-        tp_multiplier = 2.0 # TP 默認基於上軌，但此參數仍用於 ATR 波動率計算
-    
-    elif risk_model == '拋物線 SAR (PSAR) 追蹤模型':
-        st.sidebar.markdown("**止損**：動態追蹤 PSAR 點位 (已固定參數)")
-        st.sidebar.markdown("**止盈**：設為寬鬆值，專注於追蹤止損**")
-        sl_multiplier = 1.5 # 保持參數存在，用於計算初始 SL
-        tp_multiplier = 6.0 # 專注於追蹤止損，TP 設一個寬鬆值 (6xATR)
-        
-    st.sidebar.markdown("---")
-    
-    # (資產選擇與週期選擇邏輯... 與 V3.0 相同)
+    # (資產選擇與週期選擇邏輯...)
     
     st.sidebar.markdown("<h1 style='color: #FA8072; font-size: 24px; font-weight: bold;'>⚙️ 數據配置</h1>", unsafe_allow_html=True)
     
     category = st.sidebar.selectbox("選擇資產類別", ["美股/ETF/指數", "台股/ETF/指數", "加密貨幣"], key='category_selector')
     
-    # 簡易篩選邏輯 (與 V3.0 保持一致)
+    # 簡易篩選邏輯
     def filter_symbols(symbol_map, category):
         if category == "美股/ETF/指數":
+            # 排除台股 (.TW) 和加密貨幣 (-USD)
             return {k: v for k, v in symbol_map.items() if not re.match(r'^\d+\.TW$', k) and '-USD' not in k}
         elif category == "台股/ETF/指數":
             return {k: v for k, v in symbol_map.items() if '.TW' in k}
@@ -453,6 +428,7 @@ def app():
     filtered_map = filter_symbols(FULL_SYMBOLS_MAP, category)
 
     hot_keys = list(filtered_map.keys())
+    # 組合下拉選單顯示名稱 (代碼 (名稱))
     hot_key_options = {k: f"{k} ({v['name']})" for k, v in filtered_map.items()}
     hot_key_list = [""] + [hot_key_options[k] for k in hot_keys]
 
@@ -464,6 +440,7 @@ def app():
         selected_symbol_from_list = match.group(1) if match else selected_option.split(" (")[0]
         st.session_state['sidebar_search_input'] = selected_symbol_from_list 
 
+    # 使用 session_state 保持上次輸入
     symbol_input = st.sidebar.text_input("或 輸入標的代碼/名稱", value=st.session_state.get('last_search_symbol', "2330.TW"), key='search_input')
     
     symbol = selected_symbol_from_list if selected_symbol_from_list else symbol_input
@@ -476,19 +453,24 @@ def app():
         st.session_state['last_search_symbol'] = symbol
         st.session_state['data_ready'] = False
         
+        if not symbol:
+             st.error("請輸入或選擇一個有效的標的代碼。")
+             return
+
         with st.spinner(f"正在分析 {symbol} 的趨勢數據..."):
             df = get_data(symbol, period_tuple)
-            if df is not None:
+            
+            if df is not None and not df.empty:
                 df = calculate_technical_indicators(df)
+                
+                if df.empty:
+                    st.error(f"無法計算 {symbol} 的技術指標。可能數據不足或K線過少。")
+                    return
+                    
                 df = generate_trend_signal(df)
                 
-                # 執行 V4.0 回測策略
-                bt = backtest_strategy_with_risk_management(
-                    df, 
-                    risk_model=risk_model, 
-                    sl_multiplier=sl_multiplier, 
-                    tp_multiplier=tp_multiplier
-                )
+                # 執行 V6.0 固定 ATR 回測策略
+                bt = backtest_strategy_with_risk_management(df)
                 score_res = calculate_score(df, symbol)
                 
                 st.session_state['analysis_result'] = {
@@ -500,7 +482,7 @@ def app():
                 }
                 st.session_state['data_ready'] = True
             else:
-                st.error(f"無法獲取 {symbol} 的數據。請檢查代碼是否正確。")
+                st.error(f"無法獲取 {symbol} 的數據。請檢查代碼是否正確或該週期數據是否存在。")
 
     # --- 輸出結果區 ---
     if st.session_state.get('data_ready', False):
@@ -508,18 +490,18 @@ def app():
         bt = res['backtest']
         score_res = res['score']
         
-        st.markdown(f"<h2 style='color: #4CAF50;'>🤖 {res['symbol']} ({res['period']}) AI趨勢分析報告 (v4.0)</h2>", unsafe_allow_html=True)
+        st.markdown(f"<h2 style='color: #4CAF50;'>🤖 {res['symbol']} ({res['period']}) AI趨勢分析報告 (v6.0)</h2>", unsafe_allow_html=True)
         st.markdown("---")
         
         # 趨勢分析總結
         col1, col2 = st.columns([1, 2])
         col1.metric("🔍 趨勢判斷", score_res['trend_analysis'], delta=f"評分: {score_res['current_score']}", delta_color='off')
-        col2.warning(f"💡 **AI 策略建議**：{score_res['recommendation']} (請結合下方 {risk_model} 回測結果進行決策)", icon="💡")
+        col2.warning(f"💡 **AI 策略建議**：{score_res['recommendation']} (所有回測結果已使用 {bt['message']} 進行風險控制)", icon="💡")
 
         st.markdown("---")
         
         # 回測結果
-        st.subheader(f"🛡️ 動態風險管理回測結果 ({bt['message']})")
+        st.subheader(f"🛡️ 自動風險控制回測結果 ({bt['message']})")
         if bt.get("total_trades", 0) > 0:
             b1, b2, b3, b4 = st.columns(4)
             b1.metric("📊 總回報率", f"{bt['total_return']}%", delta=bt['message'], delta_color='off')
@@ -530,11 +512,11 @@ def app():
             # 資金曲線圖
             if 'capital_curve' in bt and not bt['capital_curve'].empty and len(bt['capital_curve']) > 1:
                 fig = go.Figure(go.Scatter(x=bt['capital_curve'].index, y=bt['capital_curve'], name='資金曲線', line=dict(color='#00FFFF')))
-                fig.update_layout(title=f'{risk_model} 策略資金曲線', height=300, template="plotly_dark")
+                fig.update_layout(title=f'固定 ATR 策略資金曲線', height=300, template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
             
             # 交易明細
-            st.markdown("<h4 style='color: #FF6347;'>📃 交易紀錄與 SL/TP 追蹤</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='color: #FF6347;'>📃 交易紀錄與 SL/TP 明細</h4>", unsafe_allow_html=True)
             trades_df = bt['trades_summary'][['entry_date', 'exit_date', 'type', 'profit', 'status', 'atr_sl', 'atr_tp']].copy()
             trades_df['profit'] = trades_df['profit'].round(2).astype(str) + '%'
             
@@ -549,33 +531,36 @@ def app():
                     "type": "方向",
                     "profit": "盈虧",
                     "status": "狀態",
-                    "atr_sl": "SL 價格 (動態追蹤)",
-                    "atr_tp": "TP 價格",
+                    "atr_sl": f"SL 價格 ({FIXED_SL_MULTIPLIER}x ATR)",
+                    "atr_tp": f"TP 價格 ({FIXED_TP_MULTIPLIER}x ATR)",
                 }
             )
 
         else: 
-            st.warning(f"回測無法執行或無交易：{bt.get('message', '錯誤')}")
+            st.warning(f"回測無法執行或無交易。請嘗試不同的標的或週期。")
             
         st.markdown("---")
         st.subheader(f"📊 完整技術分析圖表")
         st.plotly_chart(create_comprehensive_chart(res['df'], res['symbol'], res['period']), use_container_width=True)
+        
+        # 移除 news_summary 因為 app3.0 的 snippet 中沒有看到 chips_news_data 的定義，為保持程式碼乾淨先移除
+        # with st.expander("📰 點此查看近期相關新聞"): st.markdown(res['chips']['news_summary'].replace("\n", "\n\n"))
     
     # --- 歡迎頁面 ---
     elif not st.session_state.get('data_ready', False):
-        st.markdown("<h1 style='color: #FA8072; font-size: 32px; font-weight: bold;'>🚀 歡迎使用 AI 趨勢分析 (v4.0)</h1>", unsafe_allow_html=True)
-        st.markdown(f"**🔥 新增功能**：多模型止損/止盈，您可以選擇 **ATR**、**布林通道 (BB)** 或 **PSAR** 進行回測。", unsafe_allow_html=True)
+        st.markdown("<h1 style='color: #FA8072; font-size: 32px; font-weight: bold;'>🚀 歡迎使用 AI 趨勢分析 (v6.0)</h1>", unsafe_allow_html=True)
+        st.markdown(f"**🔥 版本更新**：已移除止損/止盈選擇器，策略固定為 **{FIXED_SL_MULTIPLIER}x ATR 止損 / {FIXED_TP_MULTIPLIER}x ATR 止盈** 的高效模型。", unsafe_allow_html=True)
         st.markdown("---")
         st.subheader("📝 使用步驟：")
-        st.markdown("1. **選擇止盈止損模型**：在左側欄選擇您希望測試的風險管理模型。")
-        st.markdown("2. **調整模型參數**：根據選擇的模型，調整 `SL/TP 倍數` 或 `SL 波動率緩衝`。")
-        st.markdown("3. **選擇資產/週期**：選擇您想分析的標的和時間週期。")
-        st.markdown(f"4. **執行分析**：點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』**</span>，系統將使用您選擇的風險模型進行回測。", unsafe_allow_html=True)
+        st.markdown("1. **選擇資產類別**：在左側欄選擇 `美股`、`台股` 或 `加密貨幣`。")
+        st.markdown("2. **選擇標的**：使用下拉選單快速選擇熱門標的，或直接在輸入框中鍵入代碼或名稱。")
+        st.markdown("3. **選擇週期**：決定分析的長度（例如：`30 分`、`4 小時`、`1 日`、`1 周`）。")
+        st.markdown(f"4. **執行分析**：點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』**</span>，AI將自動使用固定風險模型進行回測。", unsafe_allow_html=True)
         st.markdown("---")
 
 
 if __name__ == '__main__':
-    # Streamlit Session State 初始化，確保變數存在
+    # Streamlit Session State 初始化
     if 'last_search_symbol' not in st.session_state:
         st.session_state['last_search_symbol'] = "2330.TW"
     if 'data_ready' not in st.session_state:
