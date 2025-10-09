@@ -5,6 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ta
+import talib
 import warnings
 import time
 import re
@@ -317,6 +318,85 @@ def support_resistance(df, lookback=60):
     df['TP'] = df['Resistance'].where(df['Volume_Filter'], df['Close'])
     return df[['Close', 'Support', 'Resistance', 'SL', 'TP']]
 
+def bollinger_bands(df, period=50, dev=2.5):
+    df['SMA'] = df['Close'].rolling(window=period).mean()
+    df['STD'] = df['Close'].rolling(window=period).std()
+    df['Upper'] = df['SMA'] + (df['STD'] * dev)
+    df['Lower'] = df['SMA'] - (df['STD'] * dev)
+    df['RSI'] = talib.RSI(df['Close'], timeperiod=14)
+    df['Volume_Filter'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.2
+    df['SL'] = df['Lower'].where((df['RSI'] < 30) & df['Volume_Filter'], df['Close'])
+    df['TP'] = df['Upper'].where((df['RSI'] > 70) & df['Volume_Filter'], df['Close'])
+    return df[['Close', 'Upper', 'Lower', 'SL', 'TP']]
+
+def atr_stop(df, period=21, multiplier_sl=2.5, multiplier_tp=5):
+    df['ATR'] = talib.ATR(df['High'], df['Low'], df['Close'], timeperiod=period)
+    df['ADX'] = talib.ADX(df['High'], df['Low'], df['Close'], timeperiod=14)
+    df['SL'] = df['Close'] - (df['ATR'] * multiplier_sl)
+    df['TP'] = df['Close'] + (df['ATR'] * multiplier_tp)
+    df['Trend_Filter'] = df['ADX'] > 25
+    df['SL'] = df['SL'].where(df['Trend_Filter'], df['Close'])
+    df['TP'] = df['TP'].where(df['Trend_Filter'], df['Close'])
+    return df[['Close', 'ATR', 'SL', 'TP']]
+
+def donchian_channel(df, period=20):
+    df['DC_Upper'] = df['High'].rolling(window=period).max()
+    df['DC_Lower'] = df['Low'].rolling(window=period).min()
+    df['Volume_Filter'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.3
+    df['SL'] = df['DC_Lower'].where(df['Volume_Filter'], df['Close'])
+    df['TP'] = df['DC_Upper'].where(df['Volume_Filter'], df['Close'])
+    return df[['Close', 'DC_Upper', 'DC_Lower', 'SL', 'TP']]
+
+def keltner_channel(df, period=20, atr_period=14, multiplier=2):
+    df['EMA'] = ta.trend.ema_indicator(df['Close'], window=period)
+    df['ATR'] = ta.volatility.atr(df['High'], df['Low'], df['Close'], window=atr_period)
+    df['KC_Upper'] = df['EMA'] + (multiplier * df['ATR'])
+    df['KC_Lower'] = df['EMA'] - (multiplier * df['ATR'])
+    df['Volume_Filter'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.3
+    df['SL'] = df['KC_Lower'].where(df['Volume_Filter'], df['Close'])
+    df['TP'] = df['KC_Upper'].where(df['Volume_Filter'], df['Close'])
+    return df[['Close', 'KC_Upper', 'KC_Lower', 'SL', 'TP']]
+
+def ichimoku_cloud(df):
+    tenkan_sen = (df['High'].rolling(window=9).max() + df['Low'].rolling(window=9).min()) / 2
+    kijun_sen = (df['High'].rolling(window=26).max() + df['Low'].rolling(window=26).min()) / 2
+    senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
+    senkou_span_b = ((df['High'].rolling(window=52).max() + df['Low'].rolling(window=52).min()) / 2).shift(26)
+    chikou_span = df['Close'].shift(-26)
+    df['Cloud_Top'] = pd.concat([senkou_span_a, senkou_span_b], axis=1).max(axis=1)
+    df['Cloud_Bottom'] = pd.concat([senkou_span_a, senkou_span_b], axis=1).min(axis=1)
+    df['Chikou_Span'] = chikou_span
+    df['SL'] = df['Cloud_Bottom'].where(df['Close'] < df['Cloud_Bottom'], df['Close'])
+    df['TP'] = df['Cloud_Top'].where(df['Close'] > df['Cloud_Top'], df['Close'])
+    return df[['Close', 'Cloud_Top', 'Cloud_Bottom', 'Chikou_Span', 'SL', 'TP']]
+
+def moving_average_cross(df, short_period=50, long_period=200):
+    df['SMA_Short'] = df['Close'].rolling(window=short_period).mean()
+    df['SMA_Long'] = df['Close'].rolling(window=long_period).mean()
+    df['Signal'] = np.where(df['SMA_Short'] > df['SMA_Long'], 1, -1)
+    df['SL'] = df['Close'].where(df['Signal'] == -1, df['Close'])
+    df['TP'] = df['Close'].where(df['Signal'] == 1, df['Close'])
+    return df[['Close', 'SMA_Short', 'SMA_Long', 'SL', 'TP']]
+
+def gann_angles(df, period=20):
+    df['Gann_Angle'] = df['Close'].rolling(window=period).mean()
+    df['SL'] = df['Gann_Angle'] * 0.95
+    df['TP'] = df['Gann_Angle'] * 1.05
+    return df[['Close', 'Gann_Angle', 'SL', 'TP']]
+
+def vwap(df):
+    df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
+    df['Volume_Filter'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.3
+    df['SL'] = df['VWAP'].where((df['Close'] < df['VWAP']) & df['Volume_Filter'], df['Close'])
+    df['TP'] = df['VWAP'].where((df['Close'] > df['VWAP']) & df['Volume_Filter'], df['Close'])
+    return df[['Close', 'VWAP', 'SL', 'TP']]
+
+def trailing_stop(df, atr_period=14, multiplier=2):
+    df['ATR'] = ta.volatility.atr(df['High'], df['Low'], df['Close'], window=atr_period)
+    df['Trailing_SL'] = df['Close'] - (multiplier * df['ATR'])
+    df['TP'] = df['Close'] + (4 * df['ATR'])
+    return df[['Close', 'Trailing_SL', 'TP']]
+
 def generate_expert_fusion_signal(df, symbol):
     expert_opinions = {}
     
@@ -331,6 +411,100 @@ def generate_expert_fusion_signal(df, symbol):
         expert_opinions['支撐/阻力'] = '接近阻力，潛在賣出'
     else:
         expert_opinions['支撐/阻力'] = '中性'
+    
+    # Bollinger Bands
+    bb_df = bollinger_bands(df.copy())
+    upper = bb_df['Upper'].iloc[-1]
+    lower = bb_df['Lower'].iloc[-1]
+    rsi = bb_df['RSI'].iloc[-1]
+    if current > upper and rsi > 70:
+        expert_opinions['布林通道'] = '價格突破上軌且RSI超買，潛在賣出'
+    elif current < lower and rsi < 30:
+        expert_opinions['布林通道'] = '價格跌破下軌且RSI超賣，潛在買入'
+    else:
+        expert_opinions['布林通道'] = '中性'
+    
+    # ATR Stop
+    atr_df = atr_stop(df.copy())
+    atr_value = atr_df['ATR'].iloc[-1]
+    adx_value = atr_df['ADX'].iloc[-1]
+    if adx_value > 25:
+        expert_opinions['ATR Stop'] = 'ADX >25 強趨勢，動態止損/止盈有效'
+    else:
+        expert_opinions['ATR Stop'] = 'ADX <25 趨勢不明，動態止損/止盈暫停'
+    
+    # Donchian Channel
+    dc_df = donchian_channel(df.copy())
+    dc_upper = dc_df['DC_Upper'].iloc[-1]
+    dc_lower = dc_df['DC_Lower'].iloc[-1]
+    if current > dc_upper and dc_df['Volume_Filter'].iloc[-1]:
+        expert_opinions['唐奇安通道'] = '突破上軌，追多買入'
+    elif current < dc_lower and dc_df['Volume_Filter'].iloc[-1]:
+        expert_opinions['唐奇安通道'] = '跌破下軌，止損賣出'
+    else:
+        expert_opinions['唐奇安通道'] = '中性'
+    
+    # Keltner Channel
+    kc_df = keltner_channel(df.copy())
+    kc_upper = kc_df['KC_Upper'].iloc[-1]
+    kc_lower = kc_df['KC_Lower'].iloc[-1]
+    if current > kc_upper and kc_df['Volume_Filter'].iloc[-1]:
+        expert_opinions['肯尼斯通道'] = '突破上軌，超買賣出'
+    elif current < kc_lower and kc_df['Volume_Filter'].iloc[-1]:
+        expert_opinions['肯尼斯通道'] = '跌破下軌，超賣買入'
+    else:
+        expert_opinions['肯尼斯通道'] = '中性'
+    
+    # Ichimoku Cloud
+    ic_df = ichimoku_cloud(df.copy())
+    cloud_top = ic_df['Cloud_Top'].iloc[-1]
+    cloud_bottom = ic_df['Cloud_Bottom'].iloc[-1]
+    chikou = ic_df['Chikou_Span'].iloc[-1]
+    if current > cloud_top and chikou > df['Close'].shift(26).iloc[-1]:
+        expert_opinions['一目均衡表'] = '價格突破雲頂，趨勢看漲'
+    elif current < cloud_bottom and chikou < df['Close'].shift(26).iloc[-1]:
+        expert_opinions['一目均衡表'] = '價格跌破雲底，趨勢看跌'
+    else:
+        expert_opinions['一目均衡表'] = '中性'
+    
+    # Moving Average Cross
+    ma_df = moving_average_cross(df.copy())
+    sma_short = ma_df['SMA_Short'].iloc[-1]
+    sma_long = ma_df['SMA_Long'].iloc[-1]
+    if sma_short > sma_long:
+        expert_opinions['移動平均線交叉'] = '金叉，多頭趨勢買入'
+    elif sma_short < sma_long:
+        expert_opinions['移動平均線交叉'] = '死叉，空頭趨勢賣出'
+    else:
+        expert_opinions['移動平均線交叉'] = '中性'
+    
+    # Gann Angles
+    gann_df = gann_angles(df.copy())
+    gann_angle = gann_df['Gann_Angle'].iloc[-1]
+    if current > gann_angle * 1.02:
+        expert_opinions['甘氏角度'] = '突破45°角，趨勢延續買入'
+    elif current < gann_angle * 0.98:
+        expert_opinions['甘氏角度'] = '跌破45°角，趨勢反轉賣出'
+    else:
+        expert_opinions['甘氏角度'] = '中性'
+    
+    # VWAP
+    vwap_df = vwap(df.copy())
+    vwap_value = vwap_df['VWAP'].iloc[-1]
+    if current > vwap_value and vwap_df['Volume_Filter'].iloc[-1]:
+        expert_opinions['VWAP'] = '價格突破VWAP，買盤強勢買入'
+    elif current < vwap_value and vwap_df['Volume_Filter'].iloc[-1]:
+        expert_opinions['VWAP'] = '價格跌破VWAP，賣壓增強賣出'
+    else:
+        expert_opinions['VWAP'] = '中性'
+    
+    # Trailing Stop
+    ts_df = trailing_stop(df.copy())
+    trailing_sl = ts_df['Trailing_SL'].iloc[-1]
+    if current > trailing_sl:
+        expert_opinions['動態止損'] = '價格高於動態止損，持有多頭'
+    else:
+        expert_opinions['動態止損'] = '價格跌破動態止損，止損賣出'
     
     # MA
     ema10 = ta.trend.ema_indicator(df['Close'], window=10).iloc[-1]
@@ -374,8 +548,24 @@ def generate_expert_fusion_signal(df, symbol):
         expert_opinions['ADX'] = 'ADX >25 確認強趨勢'
     
     # Weights for fusion
-    weights = {'支撐/阻力': 0.2, '移動平均線 (MA)': 0.2, '相對強弱指數 (RSI)': 0.15, 'MACD': 0.15, '成交量': 0.1, 'ADX': 0.1}
-    ta_score = sum(weights.get(k, 0.1) * (1 if '多頭' in v or '買入' in v else -1 if '空頭' in v or '賣出' in v else 0) for k, v in expert_opinions.items()) * 100
+    weights = {
+        '支撐/阻力': 0.1,
+        '布林通道': 0.1,
+        'ATR Stop': 0.1,
+        '唐奇安通道': 0.1,
+        '肯尼斯通道': 0.1,
+        '一目均衡表': 0.1,
+        '移動平均線交叉': 0.1,
+        '甘氏角度': 0.1,
+        'VWAP': 0.1,
+        '動態止損': 0.1,
+        '移動平均線 (MA)': 0.1,
+        '相對強弱指數 (RSI)': 0.05,
+        'MACD': 0.05,
+        '成交量': 0.05,
+        'ADX': 0.05
+    }
+    ta_score = sum(weights.get(k, 0.05) * (1 if '多頭' in v or '買入' in v else -1 if '空頭' in v or '賣出' in v else 0) for k, v in expert_opinions.items()) * 100
     
     # Fundamental
     ticker = yf.Ticker(symbol)
@@ -413,12 +603,41 @@ def generate_expert_fusion_signal(df, symbol):
     action = '買進' if fusion_score > 50 else '賣出' if fusion_score < -50 else '觀望'
     
     current_price = df['Close'].iloc[-1]
-    atr = ta.volatility.atr(df['High'], df['Low'], df['Close'], window=14).iloc[-1]
+    atr_value = atr_df['ATR'].iloc[-1]
     entry_price = current_price
-    take_profit = sr_df['TP'].iloc[-1] if sr_df['Volume_Filter'].iloc[-1] else current_price + 2 * atr
-    stop_loss = sr_df['SL'].iloc[-1] if sr_df['Volume_Filter'].iloc[-1] else current_price - atr
+    # Prioritize SL/TP based on indicator signals
+    if '突破上軌' in expert_opinions.get('布林通道', '') and rsi > 70:
+        take_profit = bb_df['TP'].iloc[-1]
+        stop_loss = bb_df['SL'].iloc[-1]
+    elif '突破上軌' in expert_opinions.get('唐奇安通道', ''):
+        take_profit = dc_df['TP'].iloc[-1]
+        stop_loss = dc_df['SL'].iloc[-1]
+    elif '突破上軌' in expert_opinions.get('肯尼斯通道', ''):
+        take_profit = kc_df['TP'].iloc[-1]
+        stop_loss = kc_df['SL'].iloc[-1]
+    elif '突破雲頂' in expert_opinions.get('一目均衡表', ''):
+        take_profit = ic_df['TP'].iloc[-1]
+        stop_loss = ic_df['SL'].iloc[-1]
+    elif '金叉' in expert_opinions.get('移動平均線交叉', ''):
+        take_profit = ma_df['TP'].iloc[-1]
+        stop_loss = ma_df['SL'].iloc[-1]
+    elif '突破45°角' in expert_opinions.get('甘氏角度', ''):
+        take_profit = gann_df['TP'].iloc[-1]
+        stop_loss = gann_df['SL'].iloc[-1]
+    elif '突破VWAP' in expert_opinions.get('VWAP', ''):
+        take_profit = vwap_df['TP'].iloc[-1]
+        stop_loss = vwap_df['SL'].iloc[-1]
+    elif '高於動態止損' in expert_opinions.get('動態止損', ''):
+        take_profit = ts_df['TP'].iloc[-1]
+        stop_loss = ts_df['Trailing_SL'].iloc[-1]
+    elif '強趨勢' in expert_opinions.get('ATR Stop', ''):
+        take_profit = atr_df['TP'].iloc[-1]
+        stop_loss = atr_df['SL'].iloc[-1]
+    else:
+        take_profit = atr_df['TP'].iloc[-1]
+        stop_loss = atr_df['SL'].iloc[-1]
     
-    strategy = '基於支撐/阻力、技術、基本面、消息、籌碼、宏觀融合'
+    strategy = '基於支撐/阻力、布林通道、ATR Stop、唐奇安通道、肯尼斯通道、一目均衡表、移動平均線交叉、甘氏角度、VWAP、動態止損、技術、基本面、消息、籌碼、宏觀融合'
     
     return {
         'action': action,
@@ -428,7 +647,7 @@ def generate_expert_fusion_signal(df, symbol):
         'stop_loss': stop_loss,
         'strategy': strategy,
         'expert_opinions': expert_opinions,
-        'atr': atr
+        'atr': atr_value
     }
 
 def get_technical_data_df(df):
@@ -446,38 +665,111 @@ def get_technical_data_df(df):
     indicators.append({'指標': '支撐位', '最新值': f"{sr_df['Support'].iloc[-1]:.2f}", '分析結論': '潛在反彈點', '顏色': 'green'})
     indicators.append({'指標': '阻力位', '最新值': f"{sr_df['Resistance'].iloc[-1]:.2f}", '分析結論': '潛在受阻點', '顏色': 'red'})
     
+    bb_df = bollinger_bands(df.copy())
+    indicators.append({'指標': '布林上軌', '最新值': f"{bb_df['Upper'].iloc[-1]:.2f}", '分析結論': '超買反轉點', '顏色': 'red'})
+    indicators.append({'指標': '布林下軌', '最新值': f"{bb_df['Lower'].iloc[-1]:.2f}", '分析結論': '超賣反彈點', '顏色': 'green'})
+    
+    atr_df = atr_stop(df.copy())
+    indicators.append({'指標': 'ATR', '最新值': f"{atr_df['ATR'].iloc[-1]:.2f}", '分析結論': '波動性衡量', '顏色': 'blue'})
+    
+    dc_df = donchian_channel(df.copy())
+    indicators.append({'指標': '唐奇安上軌', '最新值': f"{dc_df['DC_Upper'].iloc[-1]:.2f}", '分析結論': '突破追多', '顏色': 'red'})
+    indicators.append({'指標': '唐奇安下軌', '最新值': f"{dc_df['DC_Lower'].iloc[-1]:.2f}", '分析結論': '跌破止損', '顏色': 'green'})
+    
+    kc_df = keltner_channel(df.copy())
+    indicators.append({'指標': '肯尼斯上軌', '最新值': f"{kc_df['KC_Upper'].iloc[-1]:.2f}", '分析結論': '超買賣出', '顏色': 'red'})
+    indicators.append({'指標': '肯尼斯下軌', '最新值': f"{kc_df['KC_Lower'].iloc[-1]:.2f}", '分析結論': '超賣買入', '顏色': 'green'})
+    
+    ic_df = ichimoku_cloud(df.copy())
+    indicators.append({'指標': '雲區頂部', '最新值': f"{ic_df['Cloud_Top'].iloc[-1]:.2f}", '分析結論': '動態阻力', '顏色': 'red'})
+    indicators.append({'指標': '雲區底部', '最新值': f"{ic_df['Cloud_Bottom'].iloc[-1]:.2f}", '分析結論': '動態支撐', '顏色': 'green'})
+    
+    ma_df = moving_average_cross(df.copy())
+    indicators.append({'指標': '50日SMA', '最新值': f"{ma_df['SMA_Short'].iloc[-1]:.2f}", '分析結論': '中短期趨勢', '顏色': 'blue'})
+    indicators.append({'指標': '200日SMA', '最新值': f"{ma_df['SMA_Long'].iloc[-1]:.2f}", '分析結論': '長期趨勢', '顏色': 'blue'})
+    
+    gann_df = gann_angles(df.copy())
+    indicators.append({'指標': '甘氏角度', '最新值': f"{gann_df['Gann_Angle'].iloc[-1]:.2f}", '分析結論': '45°趨勢參考', '顏色': 'blue'})
+    
+    vwap_df = vwap(df.copy())
+    indicators.append({'指標': 'VWAP', '最新值': f"{vwap_df['VWAP'].iloc[-1]:.2f}", '分析結論': '日內基準', '顏色': 'blue'})
+    
+    ts_df = trailing_stop(df.copy())
+    indicators.append({'指標': '動態止損', '最新值': f"{ts_df['Trailing_SL'].iloc[-1]:.2f}", '分析結論': '動態止損點', '顏色': 'green'})
+    
     technical_df = pd.DataFrame(indicators)
     return technical_df
 
 def create_comprehensive_chart(df, symbol, period_key):
-    fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.03, subplot_titles=('股價', '成交量', 'RSI', 'MACD'),
-                        row_width=[0.2, 0.2, 0.2, 0.6])
+    fig = make_subplots(rows=5, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.03, 
+                        subplot_titles=('股價', '成交量', 'RSI', 'MACD', '一目均衡表'),
+                        row_width=[0.2, 0.2, 0.2, 0.2, 0.6])
     
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']), row=1, col=1)
+    # Candlestick
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
     
+    # EMAs
     ema10 = ta.trend.ema_indicator(df['Close'], window=10)
     ema50 = ta.trend.ema_indicator(df['Close'], window=50)
-    fig.add_trace(go.Scatter(x=df.index, y=ema10, name='EMA10'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=ema50, name='EMA50'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=ema10, name='EMA10', line=dict(color='blue')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=ema50, name='EMA50', line=dict(color='orange')), row=1, col=1)
     
+    # Support/Resistance
     sr_df = support_resistance(df.copy())
     fig.add_trace(go.Scatter(x=df.index, y=sr_df['Support'], name='Support', line=dict(color='green', dash='dash')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=sr_df['Resistance'], name='Resistance', line=dict(color='red', dash='dash')), row=1, col=1)
     
+    # Bollinger Bands
+    bb_df = bollinger_bands(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=bb_df['Upper'], name='Bollinger Upper', line=dict(color='purple', dash='dot')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=bb_df['Lower'], name='Bollinger Lower', line=dict(color='blue', dash='dot')), row=1, col=1)
+    
+    # Donchian Channel
+    dc_df = donchian_channel(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=dc_df['DC_Upper'], name='Donchian Upper', line=dict(color='pink', dash='dot')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=dc_df['DC_Lower'], name='Donchian Lower', line=dict(color='cyan', dash='dot')), row=1, col=1)
+    
+    # Keltner Channel
+    kc_df = keltner_channel(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=kc_df['KC_Upper'], name='Keltner Upper', line=dict(color='magenta', dash='dash')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=kc_df['KC_Lower'], name='Keltner Lower', line=dict(color='lime', dash='dash')), row=1, col=1)
+    
+    # Moving Average Cross
+    ma_df = moving_average_cross(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=ma_df['SMA_Short'], name='SMA50', line=dict(color='gold')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=ma_df['SMA_Long'], name='SMA200', line=dict(color='brown')), row=1, col=1)
+    
+    # Gann Angles
+    gann_df = gann_angles(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=gann_df['Gann_Angle'], name='Gann Angle', line=dict(color='grey', dash='dash')), row=1, col=1)
+    
+    # VWAP
+    vwap_df = vwap(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=vwap_df['VWAP'], name='VWAP', line=dict(color='black', dash='dash')), row=1, col=1)
+    
+    # Volume
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume'), row=2, col=1)
     
+    # RSI
     rsi = ta.momentum.rsi(df['Close'])
     fig.add_trace(go.Scatter(x=df.index, y=rsi, name='RSI'), row=3, col=1)
     fig.add_hline(y=70, row=3, col=1)
     fig.add_hline(y=30, row=3, col=1)
     
+    # MACD
     macd = ta.trend.MACD(df['Close'])
     fig.add_trace(go.Scatter(x=df.index, y=macd.macd(), name='MACD'), row=4, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=macd.macd_signal(), name='Signal'), row=4, col=1)
     fig.add_trace(go.Bar(x=df.index, y=macd.macd_diff(), name='Hist'), row=4, col=1)
     
-    fig.update_layout(title=f"{symbol} 技術圖表 ({period_key})", height=800)
+    # Ichimoku Cloud
+    ic_df = ichimoku_cloud(df.copy())
+    fig.add_trace(go.Scatter(x=df.index, y=ic_df['Cloud_Top'], name='Cloud Top', line=dict(color='red')), row=5, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=ic_df['Cloud_Bottom'], name='Cloud Bottom', line=dict(color='green')), row=5, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=ic_df['Chikou_Span'], name='Chikou Span', line=dict(color='blue', dash='dash')), row=5, col=1)
+    
+    fig.update_layout(title=f"{symbol} 技術圖表 ({period_key})", height=1000)
     return fig
 
 def run_backtest(df, symbol, sl_pct=0.05, tp_pct=0.1):
@@ -492,21 +784,26 @@ def run_backtest(df, symbol, sl_pct=0.05, tp_pct=0.1):
     position = 0
     entry = 0
     trades = []
+    atr_df = atr_stop(df.copy())
+    ts_df = trailing_stop(df.copy())
+    
     for i in range(1, len(df)):
+        current = df['Close'].iloc[i]
+        trailing_sl = ts_df['Trailing_SL'].iloc[i]
+        
         if df['signal'].iloc[i] != position:
             if position != 0:
-                exit_price = df['Close'].iloc[i]
+                exit_price = current
                 ret = (exit_price - entry) / entry * position
                 trades.append(ret)
             if df['signal'].iloc[i] != 0:
-                entry = df['Close'].iloc[i]
+                entry = current
             position = df['signal'].iloc[i]
         
         if position != 0:
-            current = df['Close'].iloc[i]
             if position > 0:
-                if current <= entry * (1 - sl_pct):
-                    ret = -sl_pct
+                if current <= trailing_sl:
+                    ret = (trailing_sl - entry) / entry
                     trades.append(ret)
                     position = 0
                 elif current >= entry * (1 + tp_pct):
@@ -514,8 +811,8 @@ def run_backtest(df, symbol, sl_pct=0.05, tp_pct=0.1):
                     trades.append(ret)
                     position = 0
             else:
-                if current >= entry * (1 + sl_pct):
-                    ret = -sl_pct
+                if current >= trailing_sl:
+                    ret = (entry - trailing_sl) / entry
                     trades.append(ret)
                     position = 0
                 elif current <= entry * (1 - tp_pct):
@@ -564,7 +861,7 @@ def run_backtest(df, symbol, sl_pct=0.05, tp_pct=0.1):
         'alpha': alpha,
         'beta': beta,
         'capital_curve': cum_ret,
-        'message': '基於AI融合信號回測'
+        'message': '基於AI融合信號回測（含動態止損）'
     }
 
 def main():
@@ -678,7 +975,7 @@ def main():
                     "判斷結果": st.column_config.Column("判斷結果", help="AI對該領域的量化判讀與結論"),
                 }
             )
-            st.caption("ℹ️ **設計師提示:** 判讀結果顏色：**紅色=多頭/強化信號** (類似低風險買入)，**綠色=空頭/削弱信號** (類似高風險賣出)，**橙色=中性/警告**。")
+            st.caption("ℹ️ **設計師提示:** 判讀結果顏色：**紅色=多頭/強化信號** (類似低風險買入)，**綠色=空頭/削弱信號** (類似高風險賣出)，**灰色=中性/警告**。")
             
             st.markdown("---")
             
@@ -730,7 +1027,7 @@ def main():
                     )
                     st.plotly_chart(fig_bt, use_container_width=True)
                     
-                st.caption("ℹ️ **策略說明:** 此回測使用 **AI 融合信號** 作為**開倉/清倉**信號 (初始資金 $100,000，單次交易手續費 0.1%)。 **總回報率**越高越好，**最大回撤 (MDD)**越低越好。")
+                st.caption("ℹ️ **策略說明:** 此回測使用 **AI 融合信號** 作為**開倉/清倉**信號，結合動態止損 (初始資金 $100,000，單次交易手續費 0.1%)。 **總回報率**越高越好，**最大回撤 (MDD)**越低越好。")
             else:
                 st.info(f"回測無法執行或無交易信號：{backtest_results.get('message', '數據不足或發生錯誤。')}")
             
@@ -791,4 +1088,4 @@ if __name__ == '__main__':
     st.markdown("⚠️ **綜合風險與免責聲明 (Risk & Disclaimer)**", unsafe_allow_html=True)
     st.markdown("本AI趨勢分析模型，是基於**量化集成學習 (Ensemble)**的專業架構。其分析結果**僅供參考用途**")
     st.markdown("投資涉及風險，所有交易決策應基於您個人的**獨立研究和財務狀況**，並強烈建議諮詢**專業金融顧問**。", unsafe_allow_html=True)
-    st.markdown("📊 **數據來源:** Alpha Vantage, Yahoo Finance | 🛠️ **技術指標:** TA 庫 | 💻 **APP優化:** 專業程式碼專家")
+    st.markdown("📊 **數據來源:** Alpha Vantage, Yahoo Finance | 🛠️ **技術指標:** TA 庫
