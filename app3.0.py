@@ -1,4 +1,4 @@
-# app_ultimate_version_fixed.py
+# app_final_pro_v2.py
 
 import re
 import warnings
@@ -350,7 +350,6 @@ def calculate_technical_indicators(df):
 
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
     df['Volume_MA_20'] = df['Volume'].rolling(window=20).mean()
-    # *** 錯誤修正: OBV的移動平均線應在此處計算 ***
     df['OBV_MA_20'] = df['OBV'].rolling(window=20).mean()
 
     # 擴充指標 for TP/SL Strategies
@@ -473,7 +472,6 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, currency_symbol):
     fa_score = ((fa_rating.get('score', 0) / 10.0) - 0.5) * 8.0
     chips_score = (chips_news_data.get('inst_hold_pct', 0) - 0.4) * 4
     volume_score = 1 if price > last['VWAP'] else -1
-    # *** 錯誤修正 ***
     if last['OBV'] > last['OBV_MA_20']: volume_score += 1; opinions['成交量 (OBV)'] = '✅ OBV 在均線之上，資金流入'
     else: volume_score -=1; opinions['成交量 (OBV)'] = '❌ OBV 在均線之下，資金流出'
     
@@ -561,6 +559,8 @@ def run_backtest(df, initial_capital=100000, commission_rate=0.001):
 # 4. Streamlit 主應用程式邏輯
 # ==============================================================================
 def main():
+    if 'run_analysis' not in st.session_state: st.session_state['run_analysis'] = False
+
     st.sidebar.title("🚀 AI 趨勢分析")
     st.sidebar.markdown("---")
     
@@ -604,7 +604,6 @@ def main():
                 }
                 analysis = generate_ai_fusion_signal(res['df'], res['fa'], res['chips'], res['currency'])
                 
-                # --- 報告輸出 ---
                 st.header(f"📈 {res['info']['name']} ({res['symbol']}) AI趨勢分析報告")
                 st.markdown(f"**分析週期:** {res['period']} | **FA評級:** **{res['fa'].get('score',0):.1f}/10.0** | **診斷:** {res['fa'].get('summary','N/A')}")
                 st.markdown("---")
@@ -667,8 +666,6 @@ def main():
         st.markdown("3. **選擇週期**：決定分析的長度（例如：`30 分` (短期)、`1 日` (中長線)）。")
         st.markdown(f"4. **執行分析**：點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span>，AI將融合基本面與技術面指標提供交易策略。", unsafe_allow_html=True)
 
-# *** 程式碼結尾修正 ***
-if 'run_analysis' not in st.session_state: st.session_state['run_analysis'] = False
 main()
 
 st.markdown("---")
