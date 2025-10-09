@@ -1,4 +1,4 @@
-# app_ultimate_version.py
+# app_ultimate_version_fixed.py
 
 import re
 import warnings
@@ -330,7 +330,7 @@ def calculate_technical_indicators(df):
     """
     依據您的進階設定計算所有核心與擴充的技術指標。
     """
-    # 核心指標 (Core Indicators)
+    # 核心指標
     df['EMA_10'] = ta.trend.ema_indicator(df['Close'], window=10)
     df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
     df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=200)
@@ -350,25 +350,22 @@ def calculate_technical_indicators(df):
 
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
     df['Volume_MA_20'] = df['Volume'].rolling(window=20).mean()
+    # *** 錯誤修正: OBV的移動平均線應在此處計算 ***
+    df['OBV_MA_20'] = df['OBV'].rolling(window=20).mean()
 
-    # 擴充指標 (Extended Indicators for TP/SL Strategies)
-    # Donchian Channel
+    # 擴充指標 for TP/SL Strategies
     df['Donchian_High'] = df['High'].rolling(window=50).max()
     df['Donchian_Low'] = df['Low'].rolling(window=50).min()
-    # Keltner Channel
     kc_ema = ta.trend.ema_indicator(df['Close'], window=30)
     kc_atr = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
     df['Keltner_High'] = kc_ema + (kc_atr * 2.5)
     df['Keltner_Low'] = kc_ema - (kc_atr * 2.5)
-    # Ichimoku Cloud
     ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'], window1=9, window2=26, window3=52)
     df['Ichimoku_A'] = ichimoku.ichimoku_a()
     df['Ichimoku_B'] = ichimoku.ichimoku_b()
-    # Supertrend
     st_atr = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
     df['Supertrend_Upper'] = (df['High'] + df['Low']) / 2 + (3.5 * st_atr)
     df['Supertrend_Lower'] = (df['High'] + df['Low']) / 2 - (3.5 * st_atr)
-    # VWAP
     df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'], window=14)
     
     return df
@@ -408,22 +405,18 @@ def calculate_advanced_fundamental_rating(symbol):
 
         score, details = 0, {}
         
-        # 獲利能力 ROE > 15% (2分)
         roe = info.get('returnOnEquity')
         if roe and roe > 0.15: score += 2; details['ROE > 15%'] = f"✅ {roe:.2%}"
         else: details['ROE < 15%'] = f"❌ {roe:.2%}" if roe is not None else "N/A"
         
-        # 財務健康 負債權益比 < 0.5 (2分)
         debt_to_equity = info.get('debtToEquity')
         if debt_to_equity is not None and debt_to_equity < 50: score += 2; details['負債權益比 < 0.5'] = f"✅ {debt_to_equity/100:.2%}"
         else: details['負債權益比 > 0.5'] = f"❌ {debt_to_equity/100:.2%}" if debt_to_equity is not None else "N/A"
         
-        # 成長性 營收年增 > 10% (1分)
         revenue_growth = info.get('revenueGrowth')
         if revenue_growth and revenue_growth > 0.1: score += 1; details['營收年增 > 10%'] = f"✅ {revenue_growth:.2%}"
         else: details['營收年增 < 10%'] = f"❌ {revenue_growth:.2%}" if revenue_growth is not None else "N/A"
         
-        # 估值 P/E < 15 (1分), PEG < 1 (1分), P/B < 1 (1分), EV/EBITDA < 10 (1分), PSR < 1 (1分)
         pe = info.get('trailingPE'); peg = info.get('pegRatio'); pb = info.get('priceToBook'); ev_ebitda = info.get('enterpriseToEbitda'); psr = info.get('priceToSales')
         
         if pe and 0 < pe < 15: score += 1; details['P/E < 15'] = f"✅ {pe:.2f}"
@@ -480,8 +473,9 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, currency_symbol):
     fa_score = ((fa_rating.get('score', 0) / 10.0) - 0.5) * 8.0
     chips_score = (chips_news_data.get('inst_hold_pct', 0) - 0.4) * 4
     volume_score = 1 if price > last['VWAP'] else -1
-    if last['OBV'] > last['OBV'].rolling(20).mean().iloc[-1]: volume_score += 1
-    else: volume_score -=1
+    # *** 錯誤修正 ***
+    if last['OBV'] > last['OBV_MA_20']: volume_score += 1; opinions['成交量 (OBV)'] = '✅ OBV 在均線之上，資金流入'
+    else: volume_score -=1; opinions['成交量 (OBV)'] = '❌ OBV 在均線之下，資金流出'
     
     # 融合總分
     total_score = ta_score * 0.5 + fa_score * 0.25 + (chips_score + volume_score) * 0.25
@@ -497,26 +491,23 @@ def generate_ai_fusion_signal(df, fa_rating, chips_news_data, currency_symbol):
     # 智能止盈止損 (Smart TP/SL)
     entry, sl, tp = price, price - atr * 2.5, price + atr * 5
     strategy = f"基於{action}信號，採用ATR停損策略 (SL: {2.5}xATR, TP: {5}xATR)"
-    # 動態選擇最佳TP/SL
     if "買進" in action:
-        # 尋找最低的合理止損 (SL)
         possible_sl = [price - atr * 2.5, last.get('Donchian_Low', price), last.get('Keltner_Low', price), last.get('BB_Low', price), last.get('Ichimoku_B', price), last.get('Supertrend_Lower', price)]
-        sl = max([s for s in possible_sl if s < price])
-        # 尋找最高的合理止盈 (TP)
+        sl = max([s for s in possible_sl if s < price and pd.notna(s)]) if any(s < price and pd.notna(s) for s in possible_sl) else price - atr * 2.5
         possible_tp = [price + atr * 5, last.get('Donchian_High', price), last.get('Keltner_High', price), last.get('BB_High', price), last.get('Ichimoku_A', price)]
-        tp = min([t for t in possible_tp if t > price])
+        tp = min([t for t in possible_tp if t > price and pd.notna(t)]) if any(t > price and pd.notna(t) for t in possible_tp) else price + atr * 5
         strategy = f"AI偵測到多頭信號，動態選擇最佳SL/TP。建議在 **{currency_symbol}{price:.4f}** 附近尋找支撐。"
     elif "賣出" in action:
         possible_sl = [price + atr * 2.5, last.get('Donchian_High', price), last.get('Keltner_High', price), last.get('BB_High', price), last.get('Ichimoku_A', price), last.get('Supertrend_Upper', price)]
-        sl = min([s for s in possible_sl if s > price])
+        sl = min([s for s in possible_sl if s > price and pd.notna(s)]) if any(s > price and pd.notna(s) for s in possible_sl) else price + atr * 2.5
         possible_tp = [price - atr * 5, last.get('Donchian_Low', price), last.get('Keltner_Low', price), last.get('BB_Low', price), last.get('Ichimoku_B', price)]
-        tp = max([t for t in possible_tp if t < price])
+        tp = max([t for t in possible_tp if t < price and pd.notna(t)]) if any(t < price and pd.notna(t) for t in possible_tp) else price - atr * 5
         strategy = f"AI偵測到空頭信號，動態選擇最佳SL/TP。建議在 **{currency_symbol}{price:.4f}** 附近尋找阻力。"
 
     return {'current_price': price, 'action': action, 'score': total_score, 'confidence': confidence, 'entry_price': entry, 'take_profit': tp, 'stop_loss': sl, 'strategy': strategy, 'atr': atr, 'ai_opinions': opinions}
 
 # ==============================================================================
-# 3. 繪圖與回測函式 (維持不變)
+# 3. 繪圖與回測函式
 # ==============================================================================
 def create_comprehensive_chart(df, symbol, period_key):
     df_clean = df.dropna()
@@ -573,13 +564,14 @@ def main():
     st.sidebar.title("🚀 AI 趨勢分析")
     st.sidebar.markdown("---")
     
-    selected_category = st.sidebar.selectbox('1. 選擇資產類別', list(CATEGORY_HOT_OPTIONS.keys()), index=1, key='category_selector')
+    selected_category = st.sidebar.selectbox('1. 選擇資產類別', list(CATEGORY_HOT_OPTIONS.keys()), index=2, key='category_selector')
     hot_options_map = CATEGORY_HOT_OPTIONS.get(selected_category, {})
     default_index = 0
-    if selected_category == '台股 (TW) - 個股/ETF/指數' and '2330.TW - 台積電' in hot_options_map:
-        default_index = list(hot_options_map.keys()).index('2330.TW - 台積電')
+    if selected_category == '加密貨幣 (Crypto)' and 'SOL-USD - Solana' in hot_options_map:
+        default_index = list(hot_options_map.keys()).index('SOL-USD - Solana')
+    
     st.sidebar.selectbox('2. 選擇熱門標的', list(hot_options_map.keys()), index=default_index, key='hot_target_selector', on_change=sync_text_input_from_selection)
-    search_input = st.sidebar.text_input('...或手動輸入代碼/名稱:', st.session_state.get('sidebar_search_input', '2330.TW'), key='sidebar_search_input')
+    st.sidebar.text_input('...或手動輸入代碼/名稱:', st.session_state.get('sidebar_search_input', 'SOL-USD'), key='sidebar_search_input')
     
     st.sidebar.markdown("---")
     selected_period_key = st.sidebar.selectbox('3. 選擇分析週期', list(PERIOD_MAP.keys()), index=2)
@@ -675,11 +667,11 @@ def main():
         st.markdown("3. **選擇週期**：決定分析的長度（例如：`30 分` (短期)、`1 日` (中長線)）。")
         st.markdown(f"4. **執行分析**：點擊 <span style='color: #FA8072; font-weight: bold;'>『📊 執行AI分析』</span>，AI將融合基本面與技術面指標提供交易策略。", unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("⚠️ **免責聲明**")
-    st.caption("本分析模型包含多位AI的量化觀點，但僅供教育與參考用途。投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並建議諮詢專業金融顧問。")
-    st.markdown("📊 **數據來源:** Yahoo Finance | **技術指標:** TA 庫 | **APP優化:** 專業程式碼專家")
+# *** 程式碼結尾修正 ***
+if 'run_analysis' not in st.session_state: st.session_state['run_analysis'] = False
+main()
 
-if __name__ == '__main__':
-    if 'run_analysis' not in st.session_state: st.session_state['run_analysis'] = False
-    main()
+st.markdown("---")
+st.markdown("⚠️ **免責聲明**")
+st.caption("本分析模型包含多位AI的量化觀點，但僅供教育與參考用途。投資涉及風險，所有交易決策應基於您個人的獨立研究和財務狀況，並建議諮詢專業金融顧問。")
+st.markdown("📊 **數據來源:** Yahoo Finance | **技術指標:** TA 庫 | **APP優化:** 專業程式碼專家")
