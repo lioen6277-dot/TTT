@@ -311,30 +311,98 @@ def get_stock_data(symbol, period, interval):
     return df
 
 def calculate_technical_indicators(df):
-    df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
-    df['CCI'] = ta.trend.CCIIndicator(df['High'], df['Low'], df['Close'], window=20).cci()
-    df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=14).adx()
-    df['MACD'] = ta.trend.MACD(df['Close']).macd()
-    df['MACD_Signal'] = ta.trend.MACD(df['Close']).macd_signal()
-    df['MACD_Hist'] = ta.trend.MACD(df['Close']).macd_diff()
-    df['SMA_20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
-    df['EMA_50'] = ta.trend.EMAIndicator(df['Close'], window=50).ema_indicator()
-    df['EMA_200'] = ta.trend.EMAIndicator(df['Close'], window=200).ema_indicator()
-    df['BB_Upper'] = ta.volatility.BollingerBands(df['Close']).bollinger_hband()
-    df['BB_Lower'] = ta.volatility.BollingerBands(df['Close']).bollinger_lband()
-    df['ATR'] = ta.volatility.AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range()
-    df['OBV'] = ta.volume.OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
-    df['Ich_Tenkan'] = ta.trend.IchimokuIndicator(df['High'], df['Low']).ichimoku_conversion_line()
-    df['Ich_Kijun'] = ta.trend.IchimokuIndicator(df['High'], df['Low']).ichimoku_base_line()
-    df['Ich_A'] = ta.trend.IchimokuIndicator(df['High'], df['Low']).ichimoku_a()
-    df['Ich_B'] = ta.trend.IchimokuIndicator(df['High'], df['Low']).ichimoku_b()
-    df['Ich_Chikou'] = df['Close'].shift(-26)
-    df['KAMA'] = ta.momentum.KAMAIndicator(df['Close']).kama()
-    df['Stoch'] = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch()
-    df['Stoch_Signal'] = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch_signal()
-    df['WPR'] = ta.momentum.WilliamsRIndicator(df['High'], df['Low'], df['Close']).williams_r()
-    df['ROC'] = ta.momentum.ROCIndicator(df['Close']).roc()
-    df['VWAP'] = ta.volume.VolumeWeightedAveragePrice(df['High'], df['Low'], df['Close'], df['Volume']).volume_weighted_average_price()
+    # 新增長度檢查：如果數據不足60筆，設定所有指標為NaN，避免計算錯誤
+    if len(df) < 60:
+        st.warning("數據點不足60筆，技術指標計算將設為NaN，請選擇更長週期或檢查symbol。")
+        for col in ['RSI', 'CCI', 'ADX', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SMA_20', 'EMA_50', 'EMA_200', 'BB_Upper', 'BB_Lower', 'ATR', 'OBV', 'Ich_Tenkan', 'Ich_Kijun', 'Ich_A', 'Ich_B', 'Ich_Chikou', 'KAMA', 'Stoch', 'Stoch_Signal', 'WPR', 'ROC', 'VWAP']:
+            df[col] = np.nan
+        return df
+
+    # 原有計算，加try-except捕捉異常
+    try:
+        df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
+    except Exception as e:
+        st.error(f"RSI計算錯誤: {e}")
+        df['RSI'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['CCI'] = ta.trend.CCIIndicator(df['High'], df['Low'], df['Close'], window=20).cci()
+    except Exception as e:
+        st.error(f"CCI計算錯誤: {e}")
+        df['CCI'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=14).adx()
+    except Exception as e:
+        st.error(f"ADX計算錯誤: {e}")
+        df['ADX'] = pd.Series(np.nan, index=df.index)
+    try:
+        macd = ta.trend.MACD(df['Close'])
+        df['MACD'] = macd.macd()
+        df['MACD_Signal'] = macd.macd_signal()
+        df['MACD_Hist'] = macd.macd_diff()
+    except Exception as e:
+        st.error(f"MACD計算錯誤: {e}")
+        df['MACD'] = df['MACD_Signal'] = df['MACD_Hist'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['SMA_20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
+        df['EMA_50'] = ta.trend.EMAIndicator(df['Close'], window=50).ema_indicator()
+        df['EMA_200'] = ta.trend.EMAIndicator(df['Close'], window=200).ema_indicator()
+    except Exception as e:
+        st.error(f"MA計算錯誤: {e}")
+        df['SMA_20'] = df['EMA_50'] = df['EMA_200'] = pd.Series(np.nan, index=df.index)
+    try:
+        bb = ta.volatility.BollingerBands(df['Close'])
+        df['BB_Upper'] = bb.bollinger_hband()
+        df['BB_Lower'] = bb.bollinger_lband()
+    except Exception as e:
+        st.error(f"Bollinger Bands計算錯誤: {e}")
+        df['BB_Upper'] = df['BB_Lower'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['ATR'] = ta.volatility.AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range()
+    except Exception as e:
+        st.error(f"ATR計算錯誤: {e}")
+        df['ATR'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['OBV'] = ta.volume.OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
+    except Exception as e:
+        st.error(f"OBV計算錯誤: {e}")
+        df['OBV'] = pd.Series(np.nan, index=df.index)
+    try:
+        ich = ta.trend.IchimokuIndicator(df['High'], df['Low'])
+        df['Ich_Tenkan'] = ich.ichimoku_conversion_line()
+        df['Ich_Kijun'] = ich.ichimoku_base_line()
+        df['Ich_A'] = ich.ichimoku_a()
+        df['Ich_B'] = ich.ichimoku_b()
+        df['Ich_Chikou'] = df['Close'].shift(-26)
+    except Exception as e:
+        st.error(f"Ichimoku計算錯誤: {e}")
+        df['Ich_Tenkan'] = df['Ich_Kijun'] = df['Ich_A'] = df['Ich_B'] = df['Ich_Chikou'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['KAMA'] = ta.momentum.KAMAIndicator(df['Close']).kama()
+    except Exception as e:
+        st.error(f"KAMA計算錯誤: {e}")
+        df['KAMA'] = pd.Series(np.nan, index=df.index)
+    try:
+        stoch = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close'])
+        df['Stoch'] = stoch.stoch()
+        df['Stoch_Signal'] = stoch.stoch_signal()
+    except Exception as e:
+        st.error(f"Stochastic計算錯誤: {e}")
+        df['Stoch'] = df['Stoch_Signal'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['WPR'] = ta.momentum.WilliamsRIndicator(df['High'], df['Low'], df['Close']).williams_r()
+    except Exception as e:
+        st.error(f"WPR計算錯誤: {e}")
+        df['WPR'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['ROC'] = ta.momentum.ROCIndicator(df['Close']).roc()
+    except Exception as e:
+        st.error(f"ROC計算錯誤: {e}")
+        df['ROC'] = pd.Series(np.nan, index=df.index)
+    try:
+        df['VWAP'] = ta.volume.VolumeWeightedAveragePrice(df['High'], df['Low'], df['Close'], df['Volume']).volume_weighted_average_price()
+    except Exception as e:
+        st.error(f"VWAP計算錯誤: {e}")
+        df['VWAP'] = pd.Series(np.nan, index=df.index)
     return df
 
 def get_company_info(symbol):
@@ -360,12 +428,8 @@ def calculate_advanced_fundamental_rating(symbol):
     return {"score": score, "details": details, "summary": summary}
 
 def get_chips_and_news_analysis(symbol):
-    ticker = yf.Ticker(symbol)
-    news = ticker.news
-    if not news:
-        news_summary = "無近期新聞"
-    else:
-        news_summary = "\n\n".join([f"{n.get('title', '無標題')} ({n.get('publisher', '未知來源')}) - {n.get('link', 'N/A')}" for n in news])
+    news = yf.Ticker(symbol).news[:5]
+    news_summary = "\n\n".join([f"{n['title']} ({n['publisher']}) - {n.get('link', 'N/A')}" for n in news])
     return {"news_summary": news_summary}
 
 def generate_ai_expert_signal(df, fa, chips, currency):
@@ -432,6 +496,160 @@ def run_backtest(data, commission_rate=0.001, initial_capital=100000):
     s = pd.Series(curve, index=data.index[:len(curve)])
     mdd = (s / s.cummax() - 1).min() * 100 if not s.empty else 0
     return {"total_return": round(ret, 2), "win_rate": round(win, 2), "max_drawdown": round(abs(mdd), 2), "total_trades": len(trades), "message": f"回測區間 {data.index[0]:%Y-%m-%d} 到 {data.index[-1]:%Y-%m-%d}", "capital_curve": s}
+
+# ==============================================================================
+# 新增函數：計算止盈止損指標
+# ==============================================================================
+def calculate_stop_loss_take_profit(df):
+    # 支撐位與阻力位
+    df['Support'] = df['Low'].rolling(window=60).min() * 0.98
+    df['Resistance'] = df['High'].rolling(window=60).max() * 1.02
+    df['Volume_Filter_SR'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.3
+    df['SL_SR'] = df['Support'].where(df['Volume_Filter_SR'], df['Close'])
+    df['TP_SR'] = df['Resistance'].where(df['Volume_Filter_SR'], df['Close'])
+
+    # 布林通道
+    df['SMA_BB'] = df['Close'].rolling(window=50).mean()
+    df['STD_BB'] = df['Close'].rolling(window=50).std()
+    df['Upper_BB'] = df['SMA_BB'] + (df['STD_BB'] * 2.5)
+    df['Lower_BB'] = df['SMA_BB'] - (df['STD_BB'] * 2.5)
+    df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
+    df['Volume_Filter_BB'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.2
+    df['SL_BB'] = df['Lower_BB'].where((df['RSI'] < 30) & df['Volume_Filter_BB'], df['Close'])
+    df['TP_BB'] = df['Upper_BB'].where((df['RSI'] > 70) & df['Volume_Filter_BB'], df['Close'])
+
+    # 平均真實範圍 (ATR)
+    df['ATR'] = ta.volatility.AverageTrueRange(df['High'], df['Low'], df['Close'], window=21).average_true_range()
+    df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=14).adx()
+    df['SL_ATR'] = df['Close'] - (df['ATR'] * 2.5)
+    df['TP_ATR'] = df['Close'] + (df['ATR'] * 5)
+    df['Trend_Filter_ATR'] = df['ADX'] > 25
+    df['SL_ATR'] = df['SL_ATR'].where(df['Trend_Filter_ATR'], df['Close'])
+    df['TP_ATR'] = df['TP_ATR'].where(df['Trend_Filter_ATR'], df['Close'])
+
+    # 唐奇安通道
+    df['Upper_DC'] = df['High'].rolling(window=50).max()
+    df['Lower_DC'] = df['Low'].rolling(window=50).min()
+    df['MACD'], _, _ = ta.trend.MACD(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9).macd()
+    df['Volume_Filter_DC'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.3
+    df['SL_DC'] = df['Lower_DC'].where((df['MACD'] < 0) & df['Volume_Filter_DC'], df['Close'])
+    df['TP_DC'] = df['Upper_DC'].where((df['MACD'] > 0) & df['Volume_Filter_DC'], df['Close'])
+
+    # 肯尼斯通道
+    df['EMA_KC'] = ta.trend.EMAIndicator(df['Close'], window=30).ema_indicator()
+    df['Upper_KC'] = df['EMA_KC'] + (df['ATR'] * 2.5)
+    df['Lower_KC'] = df['EMA_KC'] - (df['ATR'] * 2.5)
+    df['OBV'] = ta.volume.OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
+    df['OBV_Filter_KC'] = df['OBV'] > df['OBV'].shift(1)
+    df['SL_KC'] = df['Lower_KC'].where((df['RSI'] < 30) & df['OBV_Filter_KC'], df['Close'])
+    df['TP_KC'] = df['Upper_KC'].where((df['RSI'] > 70) & df['OBV_Filter_KC'], df['Close'])
+
+    # 一目均衡表
+    df['Tenkan'] = (df['High'].rolling(9).max() + df['Low'].rolling(9).min()) / 2
+    df['Kijun'] = (df['High'].rolling(26).max() + df['Low'].rolling(26).min()) / 2
+    df['Senkou_A'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
+    df['Senkou_B'] = ((df['High'].rolling(52).max() + df['Low'].rolling(52).min()) / 2).shift(26)
+    df['Chikou'] = df['Close'].shift(-26)
+    df['Volume_Filter_Ichi'] = df['Volume'] > df['Volume'].rolling(20).mean() * 1.2
+    df['SL_Ichi'] = df['Senkou_B'].where((df['Close'] < df['Senkou_B']) & (df['ADX'] > 25) & df['Volume_Filter_Ichi'], df['Close'])
+    df['TP_Ichi'] = df['Senkou_A'].where((df['Close'] > df['Senkou_A']) & (df['ADX'] > 25) & df['Volume_Filter_Ichi'], df['Close'])
+
+    # 移動平均線交叉
+    df['Fast_EMA'] = ta.trend.EMAIndicator(df['Close'], window=20).ema_indicator()
+    df['Slow_EMA'] = ta.trend.EMAIndicator(df['Close'], window=50).ema_indicator()
+    df['OBV_Filter_MA'] = df['OBV'] > df['OBV'].shift(1)
+    df['SL_MA'] = df['Slow_EMA'].where((df['Fast_EMA'] < df['Slow_EMA']) & (df['MACD'] < 0) & df['OBV_Filter_MA'], df['Close'])
+    df['TP_MA'] = df['Fast_EMA'].where((df['Fast_EMA'] > df['Slow_EMA']) & (df['MACD'] > 0) & df['OBV_Filter_MA'], df['Close'])
+
+    # 甘氏角度 (簡化計算)
+    df['Gann_Angle'] = df['Close'].shift(21) * (1 + 1/21)  # 簡化45°角
+    df['Volume_Filter_Gann'] = df['Volume'] > df['Volume'].rolling(50).mean() * 1.3
+    df['SL_Gann'] = df['Gann_Angle'] * 0.98
+    df['TP_Gann'] = df['Gann_Angle'] * 1.02
+    df['SL_Gann'] = df['SL_Gann'].where(df['Volume_Filter_Gann'], df['Close'])
+    df['TP_Gann'] = df['TP_Gann'].where(df['Volume_Filter_Gann'], df['Close'])
+
+    # 成交量加權平均價 (VWAP)
+    df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
+    df['Volume_Filter_VWAP'] = df['Volume'] > df['Volume'].rolling(20).mean() * 1.2
+    df['SL_VWAP'] = df['VWAP'].where((df['Close'] < df['VWAP']) & (df['RSI'] < 30) & df['Volume_Filter_VWAP'], df['Close'])
+    df['TP_VWAP'] = df['VWAP'].where((df['Close'] > df['VWAP']) & (df['RSI'] > 70) & df['Volume_Filter_VWAP'], df['Close'])
+
+    # 動態止損 (Trailing Stop)
+    df['SL_Trailing'] = df['Close'] - (df['ATR'] * 3)
+    df['TP_Trailing'] = df['Close'] + (df['ATR'] * 6)
+    df['Trend_Filter_Trailing'] = (df['ADX'] > 20) & (df['MACD'] > 0)
+    df['SL_Trailing'] = df['SL_Trailing'].where(df['Trend_Filter_Trailing'], df['Close'])
+    df['TP_Trailing'] = df['TP_Trailing'].where(df['Trend_Filter_Trailing'], df['Close'])
+
+    # Chandelier Exit
+    df['High_Max'] = df['High'].rolling(window=22).max()
+    df['Volume_Filter_Chand'] = df['Volume'] > df['Volume'].rolling(30).mean() * 1.3
+    df['SL_Chand'] = df['High_Max'] - (df['ATR'] * 3.5)
+    df['TP_Chand'] = df['Close'] + (df['ATR'] * 7)
+    df['SL_Chand'] = df['SL_Chand'].where((df['RSI'] < 70) & df['Volume_Filter_Chand'], df['Close'])
+    df['TP_Chand'] = df['TP_Chand'].where((df['RSI'] > 70) & df['Volume_Filter_Chand'], df['Close'])
+
+    # Supertrend Indicator
+    df['H-L'] = df['High'] - df['Low']
+    df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
+    df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    df['ATR_ST'] = df['TR'].rolling(window=14).mean()
+    df['UpperBand_ST'] = df['Close'] + (3.5 * df['ATR_ST'])
+    df['LowerBand_ST'] = df['Close'] - (3.5 * df['ATR_ST'])
+    df['Supertrend'] = np.nan
+    df['Trend_ST'] = 0
+    df.loc[14, 'Supertrend'] = df.loc[14, 'LowerBand_ST']
+    for i in range(15, len(df)):
+        if df['Close'].iloc[i-1] > df['Supertrend'].iloc[i-1]:
+            df.loc[i, 'Supertrend'] = df['LowerBand_ST'].iloc[i]
+            df.loc[i, 'Trend_ST'] = 1
+        else:
+            df.loc[i, 'Supertrend'] = df['UpperBand_ST'].iloc[i]
+            df.loc[i, 'Trend_ST'] = -1
+    df['SL_ST'] = df['Supertrend'].where((df['Trend_ST'] == 1) & (df['MACD'] > 0), df['Close'])
+    df['TP_ST'] = df['UpperBand_ST'].where((df['Trend_ST'] == 1) & (df['MACD'] > 0), df['Close'])
+
+    # Parabolic SAR
+    df['SAR'] = ta.trend.PSARIndicator(df['High'], df['Low'], df['Close'], step=0.015, max_step=0.15).psar()
+    df['Volume_Filter_SAR'] = df['Volume'] > df['Volume'].rolling(20).mean() * 1.2
+    df['SL_SAR'] = df['SAR'].where((df['Close'] < df['SAR']) & (df['RSI'] < 30) & df['Volume_Filter_SAR'], df['Close'])
+    df['TP_SAR'] = df['SAR'].where((df['Close'] > df['SAR']) & (df['RSI'] > 70) & df['Volume_Filter_SAR'], df['Close'])
+
+    # Pivot Points
+    df['Pivot'] = (df['High'].shift(1) + df['Low'].shift(1) + df['Close'].shift(1)) / 3
+    df['S1'] = (2 * df['Pivot']) - df['High'].shift(1)
+    df['R1'] = (2 * df['Pivot']) - df['Low'].shift(1)
+    df['Volume_Filter_Pivot'] = df['Volume'] > df['Volume'].rolling(30).mean() * 1.3
+    df['SL_Pivot'] = df['S1'].where((df['Close'] < df['S1']) & df['Volume_Filter_Pivot'] & (df['OBV'] > df['OBV'].shift(1)), df['Close'])
+    df['TP_Pivot'] = df['R1'].where((df['Close'] > df['R1']) & df['Volume_Filter_Pivot'] & (df['OBV'] > df['OBV'].shift(1)), df['Close'])
+
+    # Volume Profile (簡化POC)
+    bins = 50
+    df['Price_Range'] = pd.cut(df['Close'], bins=bins)
+    poc = df.groupby('Price_Range')['Volume'].sum().idxmax().mid if not df.empty else np.nan
+    df['POC'] = poc
+    df['Volume_Filter_VP'] = df['Volume'] > df['Volume'].rolling(20).mean() * 1.2
+    df['SL_VP'] = df['POC'] * 0.98 if not np.isnan(poc) else np.nan
+    df['TP_VP'] = df['POC'] * 1.02 if not np.isnan(poc) else np.nan
+    df['SL_VP'] = df['SL_VP'].where((df['RSI'] < 30) & df['Volume_Filter_VP'], df['Close'])
+    df['TP_VP'] = df['TP_VP'].where((df['RSI'] > 70) & df['Volume_Filter_VP'], df['Close'])
+
+    # Market Profile (簡化VAH/VAL)
+    if not df.empty:
+        vah = df.groupby('Price_Range')['Volume'].sum().quantile(0.75).mid if not df.groupby('Price_Range')['Volume'].sum().empty else np.nan
+        val = df.groupby('Price_Range')['Volume'].sum().quantile(0.25).mid if not df.groupby('Price_Range')['Volume'].sum().empty else np.nan
+        df['VAH'] = vah
+        df['VAL'] = val
+    else:
+        df['VAH'] = np.nan
+        df['VAL'] = np.nan
+    df['Volume_Filter_MP'] = df['Volume'] > df['Volume'].rolling(30).mean() * 1.3
+    df['SL_MP'] = df['VAL'].where((df['Close'] < df['VAL']) & df['Volume_Filter_MP'] & (df['OBV'] > df['OBV'].shift(1)), df['Close'])
+    df['TP_MP'] = df['VAH'].where((df['Close'] > df['VAH']) & df['Volume_Filter_MP'] & (df['OBV'] > df['OBV'].shift(1)), df['Close'])
+
+    return df
 
 # ==============================================================================
 # 4. Streamlit 主應用程式邏輯
